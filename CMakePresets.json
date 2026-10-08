@@ -1,0 +1,26 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {"major": 3, "minor": 28, "patch": 0},
+  "configurePresets": [
+    {"name":"windows", "generator":"Visual Studio 18 2026", "architecture":"x64", "binaryDir":"${sourceDir}/build/windows"},
+    {"name":"windows-asan", "inherits":"windows", "binaryDir":"${sourceDir}/build/windows-asan", "cacheVariables":{"SOULS_ASAN":"ON","CMAKE_MSVC_DEBUG_INFORMATION_FORMAT":"ProgramDatabase"}},
+    {"name":"core", "inherits":"windows", "binaryDir":"${sourceDir}/build/core", "cacheVariables":{"SOULS_BUILD_SHELLS":"OFF"}},
+    {"name":"linux", "generator":"Ninja", "binaryDir":"${sourceDir}/build/linux", "cacheVariables":{"CMAKE_BUILD_TYPE":"Debug"}},
+    {"name":"linux-sanitize", "inherits":"linux", "binaryDir":"${sourceDir}/build/linux-sanitize", "cacheVariables":{"SOULS_ASAN":"ON","SOULS_UBSAN":"ON"}},
+    {"name":"linux-core", "inherits":"linux", "binaryDir":"${sourceDir}/build/linux-core", "cacheVariables":{"SOULS_BUILD_SHELLS":"OFF"}}
+  ],
+  "buildPresets": [
+    {"name":"windows", "configurePreset":"windows", "configuration":"Debug"},
+    {"name":"windows-asan", "configurePreset":"windows-asan", "configuration":"Debug"},
+    {"name":"core", "configurePreset":"core", "configuration":"Debug"},
+    {"name":"linux", "configurePreset":"linux"},
+    {"name":"linux-sanitize", "configurePreset":"linux-sanitize"},
+    {"name":"linux-core", "configurePreset":"linux-core"}
+  ],
+  "testPresets": [
+    {"name":"windows", "configurePreset":"windows", "configuration":"Debug", "output":{"outputOnFailure":true}},
+    {"name":"core", "configurePreset":"core", "configuration":"Debug", "output":{"outputOnFailure":true}},
+    {"name":"linux", "configurePreset":"linux", "output":{"outputOnFailure":true}},
+    {"name":"linux-sanitize", "configurePreset":"linux-sanitize", "output":{"outputOnFailure":true}}
+  ]
+}

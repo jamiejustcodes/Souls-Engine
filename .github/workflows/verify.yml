@@ -1,0 +1,31 @@
+name: Foundation verification
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build/ci -G "Visual Studio 17 2022" -A x64 -DSOULS_VULKAN_COMPILE_CHECK=ON
+      - run: cmake --build build/ci --config Debug --parallel
+      - run: ctest --test-dir build/ci -C Debug -LE "gpu|interactive" --output-on-failure
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y gcc-14 g++-14 clang-19 ninja-build libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers xvfb
+      - name: Configure
+        run: |
+          if [ '${{ matrix.compiler }}' = gcc ]; then export CC=gcc-14 CXX=g++-14; else export CC=clang-19 CXX=clang++-19; fi
+          cmake --preset linux-sanitize
+      - run: cmake --build --preset linux-sanitize --parallel 2
+      - run: ctest --preset linux-sanitize -LE 'gpu|interactive'
+      - name: Vulkan validation smoke on Mesa
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          SDL_VIDEODRIVER: x11
+        run: |
+          xvfb-run -a ./build/linux-sanitize/SoulsRuntime --validation --smoke 120
+          xvfb-run -a ./build/linux-sanitize/SoulsEditor --validation --smoke 120

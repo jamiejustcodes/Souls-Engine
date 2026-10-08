@@ -1,0 +1,8 @@
+if(config STREQUAL "Debug")
+  foreach(source IN ITEMS "${runtime}" "${debug_runtime}")
+    if(EXISTS "${source}")
+      get_filename_component(filename "${source}" NAME)
+      file(COPY_FILE "${source}" "${destination}/${filename}" ONLY_IF_DIFFERENT)
+    endif()
+  endforeach()
+endif()
