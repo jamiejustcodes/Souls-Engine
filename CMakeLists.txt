@@ -4,6 +4,8 @@ project(SoulsEngine VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# The engine uses headers, not C++ modules; builds do not need clang-scan-deps.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(SOULS_BUILD_SHELLS "Build SDL runtime and editor" ON)
 option(SOULS_ASAN "Enable AddressSanitizer in Debug" OFF)

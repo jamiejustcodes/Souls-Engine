@@ -3,14 +3,27 @@ on: [push, pull_request, workflow_dispatch]
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - run: cmake -S . -B build/ci -G "Visual Studio 17 2022" -A x64 -DSOULS_VULKAN_COMPILE_CHECK=ON
-      - run: cmake --build build/ci --config Debug --parallel
+      - name: Configure and build with the installed MSVC toolchain
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vsPath = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsPath) { throw 'No x64 MSVC toolchain is installed on this runner.' }
+          Import-Module (Join-Path $vsPath 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
+          Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DSOULS_VULKAN_COMPILE_CHECK=ON
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
+          cmake --build build/ci --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
       - run: ctest --test-dir build/ci -C Debug -LE "gpu|interactive" --output-on-failure
   linux:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         compiler: [gcc, clang]
     steps:
