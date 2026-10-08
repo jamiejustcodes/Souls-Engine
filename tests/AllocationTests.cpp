@@ -15,10 +15,24 @@ void count() noexcept {
 }
 void *allocate(std::size_t bytes) noexcept {
     count();
-    auto *p = std::malloc(bytes ? bytes : 1);
+    return std::malloc(bytes ? bytes : 1);
+}
+void *require_allocation(void *p) noexcept {
     if (!p)
         std::abort();
     return p;
+}
+void *allocate_aligned(std::size_t bytes, std::align_val_t alignment) noexcept {
+    count();
+    const auto align = static_cast<std::size_t>(alignment);
+#if defined(_WIN32)
+    return _aligned_malloc(bytes ? bytes : 1, align);
+#else
+    if (bytes > std::numeric_limits<std::size_t>::max() - (align - 1))
+        return nullptr;
+    const auto padded = (bytes + align - 1) / align * align;
+    return std::aligned_alloc(align, padded ? padded : align);
+#endif
 }
 ecs_os_api_malloc_t original_malloc = nullptr;
 ecs_os_api_calloc_t original_calloc = nullptr;
@@ -53,9 +67,17 @@ struct Monitor {
 };
 } // namespace
 void *operator new(std::size_t bytes) {
-    return allocate(bytes);
+    return require_allocation(allocate(bytes));
 }
 void *operator new[](std::size_t bytes) {
+    return require_allocation(allocate(bytes));
+}
+// ASan supplies its own nothrow overloads unless we replace them too. Every
+// allocation form must use the same allocator as our replacement delete hooks.
+void *operator new(std::size_t bytes, const std::nothrow_t &) noexcept {
+    return allocate(bytes);
+}
+void *operator new[](std::size_t bytes, const std::nothrow_t &) noexcept {
     return allocate(bytes);
 }
 void operator delete(void *ptr) noexcept {
@@ -70,21 +92,23 @@ void operator delete(void *ptr, std::size_t) noexcept {
 void operator delete[](void *ptr, std::size_t) noexcept {
     std::free(ptr);
 }
+void operator delete(void *ptr, const std::nothrow_t &) noexcept {
+    std::free(ptr);
+}
+void operator delete[](void *ptr, const std::nothrow_t &) noexcept {
+    std::free(ptr);
+}
 void *operator new(std::size_t bytes, std::align_val_t alignment) {
-    count();
-    const auto align = static_cast<std::size_t>(alignment);
-#if defined(_WIN32)
-    auto *ptr = _aligned_malloc(bytes ? bytes : 1, align);
-#else
-    const auto padded = (bytes + align - 1) / align * align;
-    auto *ptr = std::aligned_alloc(align, padded ? padded : align);
-#endif
-    if (!ptr)
-        std::abort();
-    return ptr;
+    return require_allocation(allocate_aligned(bytes, alignment));
 }
 void *operator new[](std::size_t bytes, std::align_val_t alignment) {
     return ::operator new(bytes, alignment);
+}
+void *operator new(std::size_t bytes, std::align_val_t alignment, const std::nothrow_t &) noexcept {
+    return allocate_aligned(bytes, alignment);
+}
+void *operator new[](std::size_t bytes, std::align_val_t alignment, const std::nothrow_t &) noexcept {
+    return allocate_aligned(bytes, alignment);
 }
 void operator delete(void *ptr, std::align_val_t) noexcept {
 #if defined(_WIN32)
@@ -102,7 +126,42 @@ void operator delete(void *ptr, std::size_t, std::align_val_t alignment) noexcep
 void operator delete[](void *ptr, std::size_t, std::align_val_t alignment) noexcept {
     ::operator delete(ptr, alignment);
 }
+void operator delete(void *ptr, std::align_val_t alignment, const std::nothrow_t &) noexcept {
+    ::operator delete(ptr, alignment);
+}
+void operator delete[](void *ptr, std::align_val_t alignment, const std::nothrow_t &) noexcept {
+    ::operator delete(ptr, alignment);
+}
 int main() {
+    // Prove the counter sees all forms before trusting a zero-allocation result.
+    constexpr auto aligned = std::align_val_t{64};
+    measuring = true;
+    void *probes[]{::operator new(32),
+                   ::operator new[](32),
+                   ::operator new(32, std::nothrow),
+                   ::operator new[](32, std::nothrow),
+                   ::operator new(64, aligned),
+                   ::operator new[](64, aligned),
+                   ::operator new(64, aligned, std::nothrow),
+                   ::operator new[](64, aligned, std::nothrow)};
+    measuring = false;
+    if (attempts != std::size(probes))
+        return 7;
+    for (auto *p : probes)
+        if (!p)
+            return 8;
+    for (std::size_t i = 4; i < std::size(probes); ++i)
+        if (reinterpret_cast<std::uintptr_t>(probes[i]) % 64 != 0)
+            return 9;
+    ::operator delete(probes[0]);
+    ::operator delete[](probes[1]);
+    ::operator delete(probes[2], std::nothrow);
+    ::operator delete[](probes[3], std::nothrow);
+    ::operator delete(probes[4], std::size_t{64}, aligned);
+    ::operator delete[](probes[5], std::size_t{64}, aligned);
+    ::operator delete(probes[6], aligned, std::nothrow);
+    ::operator delete[](probes[7], aligned, std::nothrow);
+    attempts = 0;
     auto scene = souls::Scene::create();
     if (!scene)
         return 1;
