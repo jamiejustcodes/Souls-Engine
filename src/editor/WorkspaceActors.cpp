@@ -26,6 +26,14 @@ const char *kind_name(ActorKind k) noexcept {
         return "Cube";
     case ActorKind::sphere:
         return "Sphere";
+    case ActorKind::cylinder:
+        return "Cylinder";
+    case ActorKind::wedge:
+        return "Wedge";
+    case ActorKind::capsule:
+        return "Capsule";
+    case ActorKind::plane:
+        return "Plane";
     case ActorKind::light:
         return "Directional Light";
     case ActorKind::sky:
@@ -77,6 +85,9 @@ void Workspace::event(const SDL_Event &e) noexcept {
         mouse_y_ += e.motion.yrel;
     }
     if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+        if (gizmo_edit_)
+            finish_edit(true);
+        marquee_ = false;
         flying_ = false;
         if (auto *w = SDL_GetWindowFromID(e.window.windowID))
             SDL_SetWindowRelativeMouseMode(w, false);
@@ -87,78 +98,157 @@ void Workspace::log(const char *text) noexcept {
     log_cursor_ = (log_cursor_ + 1) % 64;
     log_count_ = std::min(log_count_ + 1, 64U);
 }
-void Workspace::spawn(Scene &scene, ActorKind kind) noexcept {
-    if (scene.size() >= 256) {
-        log("Editor actor limit: 256");
-        return;
-    }
-    char label[64]{};
-    std::snprintf(label, sizeof(label), "%s_%zu", kind_name(kind), scene.size());
-    auto h = scene.spawn(kind, label, {0, 0, 1});
-    if (h) {
-        selected_ = *h;
-        log("Actor added to DefaultMap");
-    } else
-        log(h.error().message);
-}
-void Workspace::duplicate_actor(Scene &scene, EntityHandle entity) noexcept {
-    if (scene.size() >= 256) {
-        log("Editor actor limit: 256");
-        return;
-    }
-    auto h = scene.duplicate(entity);
-    if (h)
-        selected_ = *h;
-    else
-        log(h.error().message);
-}
-void Workspace::play(Scene &scene) noexcept {
-    if (scene.size() > snapshot_.size()) {
-        log("Simulation supports up to 256 actors");
-        return;
-    }
-    snapshot_count_ = 0;
-    for (auto h : scene.actors()) {
-        auto a = scene.actor(h);
-        snapshot_[snapshot_count_] = *a;
-        snapshot_handles_[snapshot_count_++] = h;
-    }
-    playing_ = true;
-    paused_ = false;
-    ejected_ = false;
-    log("Simulation started: primitives rotate; Stop restores the edit world");
-}
-void Workspace::stop(Scene &scene) noexcept {
-    std::array<EntityHandle, 256> remove{};
-    std::size_t count = 0;
-    for (auto h : scene.actors()) {
-        bool original = false;
-        for (std::size_t i = 0; i < snapshot_count_; ++i)
-            if (snapshot_handles_[i] == h)
-                original = true;
-        if (!original && count < remove.size())
-            remove[count++] = h;
-    }
-    for (std::size_t i = 0; i < count; ++i) {
-        auto done = scene.remove(remove[i]);
+void Workspace::finish_edit(bool cancel) noexcept {
+    if (document_.editing()) {
+        auto done = cancel ? document_.cancel_edit() : document_.commit_edit();
         if (!done)
             log(done.error().message);
     }
-    for (std::size_t i = 0; i < snapshot_count_; ++i) {
-        auto done = scene.update(snapshot_handles_[i], snapshot_[i]);
-        if (!done) {
-            auto h = scene.spawn(snapshot_[i].kind, snapshot_[i].label.data(), snapshot_[i].transform);
-            if (h) {
-                auto restored = scene.update(*h, snapshot_[i]);
-                if (!restored)
-                    log(restored.error().message);
-            } else
-                log(h.error().message);
+    gizmo_edit_ = details_edit_ = false;
+    edit_count_ = 0;
+    selected_ = document_.primary();
+}
+void Workspace::select_entity(EntityHandle entity, SelectionMode mode) noexcept {
+    finish_edit();
+    document_.select(entity, mode);
+    selected_ = document_.primary();
+}
+void Workspace::undo(bool redo) noexcept {
+    finish_edit();
+    auto done = redo ? document_.redo() : document_.undo();
+    if (!done)
+        log(done.error().message);
+    selected_ = document_.primary();
+}
+void Workspace::erase_selection() noexcept {
+    finish_edit();
+    auto done = document_.erase_selection();
+    if (!done)
+        log(done.error().message);
+    selected_ = document_.primary();
+}
+bool Workspace::selection_locked() const noexcept {
+    for (auto h : document_.selection()) {
+        auto a = scene_.actor(h);
+        if (a && a->locked)
+            return true;
+    }
+    return false;
+}
+Vec3 Workspace::selection_center() const noexcept {
+    Vec3 center{};
+    std::size_t count = 0;
+    for (auto h : document_.selection()) {
+        if (auto a = scene_.actor(h); a) {
+            center = center + Vec3{a->transform.x, a->transform.y, a->transform.z};
+            ++count;
         }
     }
-    selected_ = {};
+    return count ? center * (1 / static_cast<float>(count)) : center;
+}
+void Workspace::begin_transform_edit(const char *label) noexcept {
+    if (document_.editing())
+        return;
+    auto done = document_.begin_edit(label);
+    if (!done) {
+        log(done.error().message);
+        return;
+    }
+    edit_count_ = 0;
+    for (auto h : document_.selection()) {
+        auto a = scene_.actor(h);
+        if (a && edit_count_ < edit_actors_.size()) {
+            edit_handles_[edit_count_] = h;
+            edit_actors_[edit_count_++] = *a;
+        }
+    }
+    if (auto a = scene_.actor(selected_); a)
+        edit_primary_ = *a;
+}
+void Workspace::preview_details(const Actor &actor) noexcept {
+    begin_transform_edit("Edit actor properties");
+    if (!document_.editing())
+        return;
+    details_edit_ = true;
+    // Numeric multi-edit applies relative translation/rotation/scale from the gesture start.
+    for (std::size_t i = 0; i < edit_count_; ++i) {
+        auto value = edit_actors_[i];
+        if (edit_handles_[i] == selected_)
+            value = actor;
+        else {
+            const auto &from = edit_primary_.transform;
+            const auto &to = actor.transform;
+            value.transform.x += to.x - from.x;
+            value.transform.y += to.y - from.y;
+            value.transform.z += to.z - from.z;
+            value.transform.rotation = value.transform.rotation + to.rotation - from.rotation;
+            value.transform.scale = {value.transform.scale.x * to.scale.x / from.scale.x,
+                                     value.transform.scale.y * to.scale.y / from.scale.y,
+                                     value.transform.scale.z * to.scale.z / from.scale.z};
+            if (actor.visible != edit_primary_.visible)
+                value.visible = actor.visible;
+            if (actor.locked != edit_primary_.locked)
+                value.locked = actor.locked;
+            if (is_primitive(value.kind) && is_primitive(actor.kind)) {
+                if (actor.kind != edit_primary_.kind)
+                    value.kind = actor.kind;
+                if (actor.material != edit_primary_.material)
+                    value.material = actor.material;
+                if (actor.color.x != edit_primary_.color.x || actor.color.y != edit_primary_.color.y ||
+                    actor.color.z != edit_primary_.color.z)
+                    value.color = actor.color;
+            }
+        }
+        auto done = document_.preview(edit_handles_[i], value);
+        if (!done) {
+            log(done.error().message);
+            finish_edit(true);
+            return;
+        }
+    }
+}
+void Workspace::spawn(Scene &scene, ActorKind kind) noexcept {
+    finish_edit();
+    char label[64]{};
+    std::snprintf(label, sizeof(label), "%s_%zu", kind_name(kind), scene.size());
+    auto h = document_.spawn(kind, label, {0, 0, primitive_bounds(kind).z});
+    if (h) {
+        selected_ = document_.primary();
+        log("Actor added");
+    } else
+        log(h.error().message);
+}
+void Workspace::duplicate_actor(Scene &, EntityHandle entity) noexcept {
+    finish_edit();
+    if (std::find(document_.selection().begin(), document_.selection().end(), entity) ==
+        document_.selection().end())
+        document_.select(entity);
+    auto done = document_.duplicate_selection();
+    if (!done)
+        log(done.error().message);
+    selected_ = document_.primary();
+}
+void Workspace::play(Scene &) noexcept {
+    finish_edit();
+    auto done = document_.begin_play();
+    if (!done) {
+        log(done.error().message);
+        return;
+    }
+    playing_ = true;
+    paused_ = ejected_ = false;
+    log("Simulation started; Stop restores the edit world");
+}
+void Workspace::stop(Scene &) noexcept {
+    finish_edit();
+    auto done = document_.stop_play();
+    if (!done) {
+        log(done.error().message);
+        return;
+    }
+    selected_ = document_.primary();
     playing_ = paused_ = ejected_ = false;
-    log("Simulation stopped; edit-world actor state restored");
+    log("Simulation stopped; edit world restored");
 }
 Result<void> Workspace::verify_workflow(Scene &scene) noexcept {
     auto fail = []() -> Result<void> {
@@ -173,7 +263,7 @@ Result<void> Workspace::verify_workflow(Scene &scene) noexcept {
     if (!cube)
         return fail();
     auto original = scene.actor(cube);
-    selected_ = cube;
+    select_entity(cube);
     play(scene);
     if (!playing_ || paused_)
         return fail();
@@ -196,11 +286,31 @@ Result<void> Workspace::verify_workflow(Scene &scene) noexcept {
         restored->transform.rotation.z != original->transform.rotation.z ||
         restored->visible != original->visible)
         return fail();
-    auto copy = scene.duplicate(cube);
-    if (!copy || !scene.remove(*copy) || scene.actor(*copy))
+    select_entity(cube);
+    if (!document_.duplicate_selection() || scene.size() != 6 || !document_.undo() || scene.size() != 5 ||
+        !document_.redo() || scene.size() != 6 || !document_.undo())
         return fail();
-    selected_ = cube;
-    log("Workflow verified: selection, edits, duplication, deletion, simulation restore");
+    select_entity(cube);
+    auto edited = *scene.actor(cube);
+    edited.transform.x += 2;
+    preview_details(edited);
+    edited.transform.x += 3;
+    preview_details(edited);
+    finish_edit();
+    if (!document_.undo() || scene.actor(cube)->transform.x != original->transform.x)
+        return fail();
+    if (!document_.redo() || scene.actor(cube)->transform.x != edited.transform.x || !document_.undo())
+        return fail();
+    // Smoke rendering covers every uploaded mesh, not only the two default actors.
+    constexpr ActorKind parts[]{ActorKind::cylinder, ActorKind::wedge, ActorKind::capsule, ActorKind::plane};
+    for (std::size_t i = 0; i < 4; ++i) {
+        auto added = document_.spawn(parts[i], kind_name(parts[i]),
+                                     {-3 + static_cast<float>(i) * 2, 4, primitive_bounds(parts[i]).z});
+        if (!added)
+            return std::unexpected(added.error());
+    }
+    select_entity(cube);
+    log("Workflow verified: coalesced edits, undo/redo, simulation restore, all six meshes");
     return {};
 }
 void Workspace::outliner(Scene &scene) noexcept {
@@ -211,82 +321,137 @@ void Workspace::outliner(Scene &scene) noexcept {
         ImGui::SetNextItemWidth(-1);
         ImGui::InputTextWithHint("##actor_search", "Search Actors...", actor_search_.data(),
                                  actor_search_.size());
+        auto row = [&](EntityHandle h) {
+            auto a = scene.actor(h);
+            if (!a || !matches(a->label.data(), actor_search_.data()))
+                return;
+            ImGui::PushID(static_cast<int>(h.index));
+            const float dpi = ImGui::GetFontSize() / 15;
+            auto eye = ImGui::GetCursorScreenPos();
+            if (ImGui::InvisibleButton("visibility", {24 * dpi, 18 * dpi})) {
+                finish_edit();
+                auto done = document_.begin_edit("Toggle actor visibility");
+                a->visible = !a->visible;
+                if (done)
+                    done = document_.preview(h, *a);
+                if (done)
+                    done = document_.commit_edit();
+                else
+                    finish_edit(true);
+                if (!done)
+                    log(done.error().message);
+            }
+            auto *draw = ImGui::GetWindowDrawList();
+            const auto tint = a->visible ? IM_COL32(197, 204, 218, 255) : IM_COL32(105, 110, 124, 255);
+            ImVec2 c{eye.x + 12 * dpi, eye.y + 9 * dpi};
+            draw->AddBezierCubic({c.x - 8 * dpi, c.y}, {c.x - 3 * dpi, c.y - 7 * dpi},
+                                 {c.x + 3 * dpi, c.y - 7 * dpi}, {c.x + 8 * dpi, c.y}, tint, dpi);
+            draw->AddBezierCubic({c.x - 8 * dpi, c.y}, {c.x - 3 * dpi, c.y + 7 * dpi},
+                                 {c.x + 3 * dpi, c.y + 7 * dpi}, {c.x + 8 * dpi, c.y}, tint, dpi);
+            draw->AddCircleFilled(c, 2 * dpi, tint);
+            if (!a->visible)
+                draw->AddLine({c.x - 8 * dpi, c.y + 7 * dpi}, {c.x + 8 * dpi, c.y - 7 * dpi}, tint, dpi);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(a->visible ? "Hide actor" : "Show actor");
+            ImGui::SameLine();
+            const bool selected = std::find(document_.selection().begin(), document_.selection().end(), h) !=
+                                  document_.selection().end();
+            char label[96]{};
+            std::snprintf(label, sizeof(label), "%s%s", a->locked ? "[L] " : "", a->label.data());
+            if (ImGui::Selectable(label, selected))
+                select_entity(h, ImGui::GetIO().KeyCtrl    ? SelectionMode::toggle
+                                 : ImGui::GetIO().KeyShift ? SelectionMode::add
+                                                           : SelectionMode::replace);
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                camera_.focus({a->transform.x, a->transform.y, a->transform.z});
+            if (ImGui::BeginPopupContextItem()) {
+                if (!selected)
+                    select_entity(h);
+                if (ImGui::MenuItem("Duplicate", "Ctrl+D"))
+                    duplicate = h;
+                if (ImGui::MenuItem("Delete", "Delete", false, !selection_locked()))
+                    erase = h;
+                if (ImGui::MenuItem("Rename")) {
+                    show_details_ = true;
+                    ImGui::SetWindowFocus("Details");
+                    rename_ = true;
+                }
+                if (ImGui::MenuItem(a->locked ? "Unlock selection" : "Lock selection")) {
+                    finish_edit();
+                    auto done = document_.set_selected_locked(!a->locked);
+                    if (!done)
+                        log(done.error().message);
+                }
+                if (ImGui::MenuItem("Group selection", "Ctrl+G", false, !selection_locked()))
+                    group_prompt_ = true;
+                if (ImGui::MenuItem("Ungroup", nullptr, false, !selection_locked())) {
+                    finish_edit();
+                    auto done = document_.ungroup_selection();
+                    if (!done)
+                        log(done.error().message);
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+        };
         if (ImGui::TreeNodeEx("World / DefaultMap", ImGuiTreeNodeFlags_DefaultOpen)) {
-            for (int group = 0; group < 2; ++group) {
-                if (ImGui::TreeNodeEx(group == 0 ? "Lighting" : "Geometry", ImGuiTreeNodeFlags_DefaultOpen)) {
+            for (int category = 0; category < 2; ++category) {
+                ImGui::PushID(category);
+                if (ImGui::TreeNodeEx(category == 0 ? "Lighting" : "Geometry",
+                                      ImGuiTreeNodeFlags_DefaultOpen)) {
+                    std::array<std::array<char, 64>, EditorDocument::actor_limit> groups{};
+                    std::size_t count = 0;
                     for (auto h : scene.actors()) {
                         auto a = scene.actor(h);
-                        bool light = a->kind == ActorKind::light || a->kind == ActorKind::sky;
-                        if ((group == 0) != light || !matches(a->label.data(), actor_search_.data()))
+                        const bool light = a->kind == ActorKind::light || a->kind == ActorKind::sky;
+                        if ((category == 0) != light)
                             continue;
-                        ImGui::PushID(static_cast<int>(h.index));
-                        const float dpi = ImGui::GetFontSize() / 15;
-                        const auto eye = ImGui::GetCursorScreenPos();
-                        if (ImGui::InvisibleButton("visibility", {24 * dpi, 18 * dpi})) {
-                            a->visible = !a->visible;
-                            auto done = scene.update(h, *a);
-                            if (!done)
-                                log(done.error().message);
+                        if (!a->group[0])
+                            row(h);
+                        else {
+                            bool found = false;
+                            for (std::size_t i = 0; i < count; ++i)
+                                found |= groups[i] == a->group;
+                            if (!found && count < groups.size())
+                                groups[count++] = a->group;
                         }
-                        auto *eye_draw = ImGui::GetWindowDrawList();
-                        const ImU32 tint =
-                            a->visible ? IM_COL32(197, 204, 218, 255) : IM_COL32(105, 110, 124, 255);
-                        const ImVec2 center{eye.x + 12 * dpi, eye.y + 9 * dpi};
-                        eye_draw->AddBezierCubic({center.x - 8 * dpi, center.y},
-                                                 {center.x - 3 * dpi, center.y - 7 * dpi},
-                                                 {center.x + 3 * dpi, center.y - 7 * dpi},
-                                                 {center.x + 8 * dpi, center.y}, tint, 1 * dpi);
-                        eye_draw->AddBezierCubic({center.x - 8 * dpi, center.y},
-                                                 {center.x - 3 * dpi, center.y + 7 * dpi},
-                                                 {center.x + 3 * dpi, center.y + 7 * dpi},
-                                                 {center.x + 8 * dpi, center.y}, tint, 1 * dpi);
-                        eye_draw->AddCircleFilled(center, 2 * dpi, tint);
-                        if (!a->visible)
-                            eye_draw->AddLine({center.x - 8 * dpi, center.y + 7 * dpi},
-                                              {center.x + 8 * dpi, center.y - 7 * dpi}, tint, 1 * dpi);
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip(a->visible ? "Hide actor" : "Show actor");
-                        ImGui::SameLine();
-                        if (ImGui::Selectable(a->label.data(), selected_ == h))
-                            selected_ = h;
+                    }
+                    for (std::size_t i = 0; i < count; ++i) {
+                        const bool open = ImGui::TreeNodeEx(groups[i].data(), ImGuiTreeNodeFlags_DefaultOpen);
                         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
-                            selected_ = h;
-                            camera_.focus({a->transform.x, a->transform.y, a->transform.z});
-                        }
-                        if (ImGui::BeginPopupContextItem()) {
-                            selected_ = h;
-                            if (ImGui::MenuItem("Duplicate"))
-                                duplicate = h;
-                            if (ImGui::MenuItem("Delete"))
-                                erase = h;
-                            if (ImGui::MenuItem("Rename")) {
-                                show_details_ = true;
-                                ImGui::SetWindowFocus("Details");
-                                rename_ = true;
+                            finish_edit();
+                            document_.clear_selection();
+                            for (auto h : scene.actors()) {
+                                auto a = scene.actor(h);
+                                if (a->group == groups[i])
+                                    document_.select(h, SelectionMode::add);
                             }
-                            ImGui::EndPopup();
+                            selected_ = document_.primary();
                         }
-                        ImGui::PopID();
+                        if (open) {
+                            for (auto h : scene.actors()) {
+                                auto a = scene.actor(h);
+                                const bool light = a->kind == ActorKind::light || a->kind == ActorKind::sky;
+                                if ((category == 0) == light && a->group == groups[i])
+                                    row(h);
+                            }
+                            ImGui::TreePop();
+                        }
                     }
                     ImGui::TreePop();
                 }
+                ImGui::PopID();
             }
             ImGui::TreePop();
         }
         ImGui::Separator();
-        ImGui::TextDisabled("%zu actors  |  %s", scene.size(), selected_ ? "1 selected" : "No selection");
+        ImGui::TextDisabled("%zu actors  |  %zu selected", scene.size(), document_.selection().size());
     }
     ImGui::End();
-    if (duplicate) {
+    if (duplicate)
         duplicate_actor(scene, duplicate);
-    }
-    if (erase) {
-        auto done = scene.remove(erase);
-        if (done)
-            selected_ = {};
-        else
-            log(done.error().message);
-    }
+    if (erase)
+        erase_selection();
 }
 void Workspace::details(Scene &scene) noexcept {
     if (!show_details_)
@@ -309,27 +474,38 @@ void Workspace::details(Scene &scene) noexcept {
             ImGui::TextDisabled("%s  |  ID %llu", kind_name(a.kind),
                                 static_cast<unsigned long long>(selected_.id()));
             changed |= ImGui::Checkbox("Active / Visible", &a.visible);
+            ImGui::SameLine();
+            changed |= ImGui::Checkbox("Locked", &a.locked);
+            if (document_.selection().size() > 1)
+                ImGui::TextDisabled("Editing %zu actors", document_.selection().size());
+            if (*a.group.data())
+                ImGui::TextDisabled("Group: %s", a.group.data());
             if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::BeginDisabled(selection_locked());
                 Vec3 p{a.transform.x, a.transform.y, a.transform.z};
-                if (vector_input("Location", p, 0, 10, translate_snap_)) {
+                if (vector_input("Location", p, 0, translate_step_, translate_snap_)) {
                     a.transform.x = p.x;
                     a.transform.y = p.y;
                     a.transform.z = p.z;
                     changed = true;
                 }
-                changed |= vector_input("Rotation", a.transform.rotation, 0, 15, rotate_snap_);
-                changed |= vector_input("Scale", a.transform.scale, 1, 0.25F, scale_snap_);
+                changed |= vector_input("Rotation", a.transform.rotation, 0, rotate_step_, rotate_snap_);
+                changed |= vector_input("Scale", a.transform.scale, 1, scale_step_, scale_snap_);
                 for (auto *v : {&a.transform.scale.x, &a.transform.scale.y, &a.transform.scale.z})
                     if (std::abs(*v) < 0.001F)
                         *v = 0.001F;
+                ImGui::EndDisabled();
             }
-            if (a.kind == ActorKind::cube || a.kind == ActorKind::sphere) {
+            if (is_primitive(a.kind)) {
                 if (ImGui::CollapsingHeader("Mesh / Render", ImGuiTreeNodeFlags_DefaultOpen)) {
                     ImGui::TextDisabled("Static Mesh");
-                    int mesh = a.kind == ActorKind::cube ? 0 : 1;
+                    int mesh = static_cast<int>(primitive_mesh_index(a.kind));
                     ImGui::SetNextItemWidth(-1);
-                    if (ImGui::Combo("##mesh", &mesh, "/Engine/Meshes/SM_Cube\0/Engine/Meshes/SM_Sphere\0")) {
-                        a.kind = mesh == 0 ? ActorKind::cube : ActorKind::sphere;
+                    if (ImGui::Combo("##mesh", &mesh,
+                                     "SM_Cube\0SM_Sphere\0SM_Cylinder\0SM_Wedge\0SM_Capsule\0SM_Plane\0")) {
+                        constexpr ActorKind kinds[]{ActorKind::cube,  ActorKind::sphere,  ActorKind::cylinder,
+                                                    ActorKind::wedge, ActorKind::capsule, ActorKind::plane};
+                        a.kind = kinds[mesh];
                         changed = true;
                     }
                     ImGui::TextDisabled("Material Instance");
@@ -367,11 +543,10 @@ void Workspace::details(Scene &scene) noexcept {
             }
             if (ImGui::Button("Focus actor", {-1, 0}))
                 camera_.focus({a.transform.x, a.transform.y, a.transform.z});
-            if (changed) {
-                auto done = scene.update(selected_, a);
-                if (!done)
-                    log(done.error().message);
-            }
+            if (changed)
+                preview_details(a);
+            if (details_edit_ && !ImGui::IsAnyItemActive())
+                finish_edit();
         }
         ImGui::EndDisabled();
     }
@@ -386,7 +561,7 @@ void Workspace::content(Scene &scene) noexcept {
         ImGui::InputTextWithHint("##asset_search", "Search assets...", asset_search_.data(),
                                  asset_search_.size());
         ImGui::SameLine();
-        ImGui::TextDisabled("Built-in assets  |  Double-click mesh to place");
+        ImGui::TextDisabled("Built-in assets  |  Drag parts into the viewport");
         if (ImGui::BeginTable("content_columns", 2, ImGuiTableFlags_Resizable)) {
             ImGui::TableSetupColumn("Folders", ImGuiTableColumnFlags_WidthFixed, 220 * dpi);
             ImGui::TableSetupColumn("Assets", ImGuiTableColumnFlags_WidthStretch);
@@ -404,16 +579,19 @@ void Workspace::content(Scene &scene) noexcept {
                 ImGui::TreePop();
             }
             ImGui::TableNextColumn();
-            const char *names[]{"SM_Cube",   "SM_Sphere",       "MI_Slate",
-                                "MI_Copper", "Playground.hlsl", "Procedural Grid"};
-            const char *tags[]{"StaticMesh", "StaticMesh", "Material", "Material", "Shader", "Procedural"};
+            const char *names[]{"SM_Cube",  "SM_Sphere", "SM_Cylinder", "SM_Wedge",        "SM_Capsule",
+                                "SM_Plane", "MI_Slate",  "MI_Copper",   "Playground.hlsl", "Procedural Grid"};
+            const char *tags[]{"StaticMesh", "StaticMesh", "StaticMesh", "StaticMesh", "StaticMesh",
+                               "StaticMesh", "Material",   "Material",   "Shader",     "Procedural"};
+            constexpr ActorKind kinds[]{ActorKind::cube,  ActorKind::sphere,  ActorKind::cylinder,
+                                        ActorKind::wedge, ActorKind::capsule, ActorKind::plane};
             ImGui::BeginChild("asset_grid", {0, 0}, ImGuiChildFlags_None);
             float width = 112 * dpi;
             int columns = std::max(1, static_cast<int>(ImGui::GetContentRegionAvail().x / (width + 8 * dpi)));
             int item = 0;
-            for (int i = 0; i < 6; ++i) {
-                if (!matches(names[i], asset_search_.data()) || (folder_ == 0 && i >= 4) ||
-                    (folder_ == 1 && i != 4) || (folder_ == 2 && i != 5))
+            for (int i = 0; i < 10; ++i) {
+                if (!matches(names[i], asset_search_.data()) || (folder_ == 0 && i >= 8) ||
+                    (folder_ == 1 && i != 8) || (folder_ == 2 && i != 9))
                     continue;
                 ImGui::PushID(i);
                 ImGui::BeginGroup();
@@ -434,22 +612,54 @@ void Workspace::content(Scene &scene) noexcept {
                     draw->AddQuadFilled({c.x, c.y + 5 * dpi}, {c.x + 25 * dpi, c.y - 9 * dpi},
                                         {c.x + 25 * dpi, c.y + 15 * dpi}, {c.x, c.y + 29 * dpi},
                                         IM_COL32(102, 120, 149, 255));
-                } else if (i < 4) {
+                } else if (i == 1 || i == 6 || i == 7) {
                     draw->AddCircleFilled(c, 24 * dpi,
-                                          i == 1 || i == 3 ? IM_COL32(176, 113, 68, 255)
+                                          i == 1 || i == 7 ? IM_COL32(176, 113, 68, 255)
                                                            : IM_COL32(113, 136, 167, 255));
                     draw->AddCircleFilled({c.x - 7 * dpi, c.y - 8 * dpi}, 8 * dpi,
                                           IM_COL32(207, 192, 173, 100));
+                } else if (i == 2) {
+                    draw->AddRectFilled({c.x - 19 * dpi, c.y - 15 * dpi}, {c.x + 19 * dpi, c.y + 21 * dpi},
+                                        IM_COL32(93, 112, 145, 255));
+                    draw->AddEllipseFilled({c.x, c.y + 21 * dpi}, {19 * dpi, 7 * dpi},
+                                           IM_COL32(93, 112, 145, 255));
+                    draw->AddEllipseFilled({c.x, c.y - 15 * dpi}, {19 * dpi, 7 * dpi},
+                                           IM_COL32(160, 179, 207, 255));
+                } else if (i == 3) {
+                    draw->AddTriangleFilled({c.x - 25 * dpi, c.y + 20 * dpi},
+                                            {c.x + 20 * dpi, c.y + 20 * dpi},
+                                            {c.x + 20 * dpi, c.y - 22 * dpi}, IM_COL32(134, 153, 183, 255));
+                    draw->AddTriangleFilled({c.x + 20 * dpi, c.y + 20 * dpi},
+                                            {c.x + 30 * dpi, c.y + 10 * dpi},
+                                            {c.x + 20 * dpi, c.y - 22 * dpi}, IM_COL32(80, 96, 126, 255));
+                } else if (i == 4) {
+                    draw->AddRectFilled({c.x - 14 * dpi, c.y - 10 * dpi}, {c.x + 14 * dpi, c.y + 10 * dpi},
+                                        IM_COL32(113, 136, 167, 255));
+                    draw->AddCircleFilled({c.x, c.y - 10 * dpi}, 14 * dpi, IM_COL32(113, 136, 167, 255));
+                    draw->AddCircleFilled({c.x, c.y + 10 * dpi}, 14 * dpi, IM_COL32(113, 136, 167, 255));
+                } else if (i == 5) {
+                    draw->AddQuadFilled({c.x, c.y - 18 * dpi}, {c.x + 30 * dpi, c.y}, {c.x, c.y + 18 * dpi},
+                                        {c.x - 30 * dpi, c.y}, IM_COL32(134, 153, 183, 255));
                 } else {
                     draw->AddText({c.x - 20 * dpi, c.y - 8 * dpi}, IM_COL32(169, 156, 255, 255),
-                                  i == 4 ? "</>" : "# #");
+                                  i == 8   ? "</>"
+                                  : i == 9 ? "# #"
+                                  : i == 2 ? "CYL"
+                                  : i == 3 ? " /|"
+                                  : i == 4 ? "CAP"
+                                           : "___");
                 }
                 draw->AddText({p.x + 8 * dpi, p.y + 69 * dpi}, IM_COL32(237, 239, 245, 255), names[i]);
                 draw->AddText({p.x + 8 * dpi, p.y + 87 * dpi}, IM_COL32(166, 158, 203, 255), tags[i]);
                 if (ImGui::IsItemClicked())
                     asset_ = i;
-                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && i < 2)
-                    spawn(scene, i == 0 ? ActorKind::cube : ActorKind::sphere);
+                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && i < 6)
+                    spawn(scene, kinds[i]);
+                if (i < 6 && ImGui::BeginDragDropSource()) {
+                    ImGui::SetDragDropPayload("SOULS_PART", &kinds[i], sizeof(ActorKind));
+                    ImGui::Text("Place %s", names[i]);
+                    ImGui::EndDragDropSource();
+                }
                 ImGui::EndGroup();
                 ImGui::PopID();
                 if (++item % columns)

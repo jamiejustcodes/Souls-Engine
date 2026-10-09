@@ -17,6 +17,8 @@ FetchContent_Declare(sdl GIT_REPOSITORY https://github.com/libsdl-org/SDL.git GI
 FetchContent_Declare(flecs GIT_REPOSITORY https://github.com/SanderMertens/flecs.git GIT_TAG a53b4715c0b91e366bbfce53d9abd2b61534f7a3)
 FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG af84778eeaab75bee0b54420f3157cf3ee00618f)
 FetchContent_Declare(implot GIT_REPOSITORY https://github.com/epezent/implot.git GIT_TAG 4707b245fbcd69075b1a8a74fa8d2435561b3134)
+FetchContent_Declare(imguizmo GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
+  GIT_TAG 18cef5e031d8c6973d80284c67f60549fafd78c1 SOURCE_SUBDIR souls-standalone)
 FetchContent_MakeAvailable(sdl flecs imgui implot)
 if(WIN32)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR CMAKE_SYSTEM_PROCESSOR MATCHES "ARM|arm")
@@ -53,4 +55,9 @@ endif()
 add_library(SoulsImPlot STATIC "${implot_SOURCE_DIR}/implot.cpp" "${implot_SOURCE_DIR}/implot_items.cpp")
 target_include_directories(SoulsImPlot SYSTEM PUBLIC "${implot_SOURCE_DIR}")
 target_link_libraries(SoulsImPlot PUBLIC SoulsImGui)
+# Only the transform widget is needed; do not build the sequencer and graph samples.
+FetchContent_MakeAvailable(imguizmo)
+add_library(SoulsImGuizmo STATIC "${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp")
+target_include_directories(SoulsImGuizmo SYSTEM PUBLIC "${imguizmo_SOURCE_DIR}/src")
+target_link_libraries(SoulsImGuizmo PUBLIC SoulsImGui)
 # Third-party sources keep their own warning/exception policy.

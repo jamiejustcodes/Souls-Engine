@@ -37,6 +37,28 @@ int main() {
         apply_gizmo_delta(actor, Mat4::identity(), model_matrix({}, {}, {2, 1, 1}), TransformTool::scale);
     check(scaled && close(scaled->x, 6) && close(scaled->scale.x, 2),
           "group scaling changes position and size");
+    actor.scale = {-2, 3, 1};
+    auto mirrored_group = apply_gizmo_delta(actor, Mat4::identity(), model_matrix({1, 0, 0}, {}, {1, 1, 1}),
+                                            TransformTool::move);
+    check(mirrored_group && close(mirrored_group->x, 4) && close(mirrored_group->scale.x, -2),
+          "mirrored actor moves in a positive-scale group pivot");
+    auto mirrored_start = model_matrix({actor.x, actor.y, actor.z}, actor.rotation, actor.scale);
+    auto mirrored_end = model_matrix({actor.x + 2, actor.y, actor.z}, actor.rotation, actor.scale);
+    auto mirrored_single =
+        apply_gizmo_delta(actor, mirrored_start, mirrored_end, TransformTool::move, actor.scale);
+    check(mirrored_single && close(mirrored_single->x, 5), "single mirrored pivot preserves scale signs");
+    Transform floor{0, 0, 4};
+    auto placement = place_on_plane({2.2F, 3.3F, 10}, {0, 0, -1}, floor, ActorKind::cube, 1);
+    check(placement && close(placement->x, 2) && close(placement->y, 3) && close(placement->z, 5),
+          "placement snaps to an elevated floor and rests on it");
+    floor.rotation = {0, 90, 0};
+    placement = place_on_plane({5, 0, 4}, {-1, 0, 0}, floor, ActorKind::capsule);
+    check(placement && close(placement->x, 1) && close(placement->z, 4),
+          "placement aligns to a rotated floor");
+    check(!place_on_plane({0, 0, 5}, {1, 0, 0}, Transform{}, ActorKind::cube),
+          "parallel placement ray is rejected");
+    check(!place_on_plane({0, 0, 5}, {0, 0, 1}, Transform{}, ActorKind::cube),
+          "floor behind the camera is rejected");
     auto shear = Mat4::identity();
     shear.m[4] = 0.5F;
     check(!decompose_transform(shear), "reject shear instead of corrupting TRS");

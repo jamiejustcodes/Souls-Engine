@@ -27,11 +27,15 @@ int main(int argc, char **argv) {
         return platform::report(ready.error());
     Renderer renderer{*device};
     editor::GraphicsUI graphics{*device};
-    editor::Workspace workspace;
+    auto document = editor::EditorDocument::create(*scene);
+    if (!document)
+        return platform::report(document.error());
+    editor::Workspace workspace{*document, *scene};
     if (auto initialized = graphics.initialize(window.get()); !initialized)
         return platform::report(initialized.error());
     if (auto ready = renderer.initialize(); !ready)
         return platform::report(ready.error());
+    workspace.initialize(window.get(), !args->smoke_frames);
     float scale = SDL_GetWindowDisplayScale(window.get());
     editor::Workspace::theme(scale);
     if (auto resized = renderer.resize_viewport(workspace.requested_extent()); !resized)
@@ -66,10 +70,7 @@ int main(int argc, char **argv) {
             ImGui_ImplSDL3_ProcessEvent(&event);
             if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
                                                  event.window.windowID == SDL_GetWindowID(window.get())))
-                running = false;
-            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE &&
-                !ImGui::GetIO().WantCaptureKeyboard)
-                running = false;
+                workspace.request_exit();
         }
         if (!running || workspace.quit_requested())
             break;
@@ -121,7 +122,7 @@ int main(int argc, char **argv) {
             return platform::report(batch.error());
         }
         if (auto drawn = renderer.record(*command, *scene, *batch, workspace.camera(), workspace.selected(),
-                                         workspace.grid(), workspace.lit());
+                                         workspace.grid(), workspace.lit(), workspace.selection());
             !drawn) {
             const auto ignored = device->end_frame(*command);
             (void)ignored;

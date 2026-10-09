@@ -87,4 +87,27 @@ Result<Transform> apply_gizmo_delta(const Transform &actor, const Mat4 &start, c
             Error{ErrorCode::invalid_argument, "Scale must stay above 0.001 on every axis."});
     return result;
 }
+Result<Transform> place_on_plane(Vec3 origin, Vec3 ray, const Transform &plane, ActorKind part,
+                                 float snap) noexcept {
+    if (!is_primitive(part) || !std::isfinite(snap) || snap < 0)
+        return std::unexpected(Error{ErrorCode::invalid_argument, "Invalid placement part or snap step."});
+    const auto basis = model_matrix({}, plane.rotation, {1, 1, 1});
+    const auto normal = direction(basis, {0, 0, 1});
+    const float denominator = dot(ray, normal);
+    if (std::abs(denominator) < 0.0001F)
+        return std::unexpected(Error{ErrorCode::invalid_argument, "Aim at the floor to place a part."});
+    const float distance = dot(position(plane) - origin, normal) / denominator;
+    if (!std::isfinite(distance) || distance <= 0)
+        return std::unexpected(Error{ErrorCode::invalid_argument, "Aim at the floor to place a part."});
+    auto tangent = direction(transpose_rotation(basis), origin + ray * distance - position(plane));
+    if (snap > 0) {
+        tangent.x = std::round(tangent.x / snap) * snap;
+        tangent.y = std::round(tangent.y / snap) * snap;
+    }
+    tangent.z = primitive_bounds(part).z;
+    auto point = position(plane) + direction(basis, tangent);
+    Transform result{point.x, point.y, point.z};
+    result.rotation = plane.rotation;
+    return result;
+}
 } // namespace souls::editor

@@ -1,5 +1,8 @@
 #pragma once
+#include "editor/FileDialogs.hpp"
 #include <imgui.h>
+#include <souls/editor/EditorDocument.hpp>
+#include <souls/editor/TransformTools.hpp>
 #include <souls/rhi/SoulsRHI.hpp>
 #include <souls/scene/Scene.hpp>
 union SDL_Event;
@@ -14,6 +17,9 @@ struct Sample {
 };
 class Workspace final {
   public:
+    Workspace(EditorDocument &document, Scene &scene) noexcept : document_(document), scene_(scene) {}
+    void initialize(SDL_Window *window, bool persistent) noexcept;
+    void request_exit() noexcept;
     void draw(ImTextureID viewport, rhi::Extent texture_extent, const char *adapter, Scene &scene,
               SDL_Window *window, float pixel_density) noexcept;
     void event(const SDL_Event &event) noexcept;
@@ -22,7 +28,10 @@ class Workspace final {
         return camera_;
     }
     [[nodiscard]] EntityHandle selected() const noexcept {
-        return selected_;
+        return document_.primary();
+    }
+    [[nodiscard]] std::span<const EntityHandle> selection() const noexcept {
+        return document_.selection();
     }
     [[nodiscard]] bool grid() const noexcept {
         return grid_;
@@ -43,6 +52,22 @@ class Workspace final {
     static void theme(float scale) noexcept;
 
   private:
+    enum class Action { none, new_level, open_level, quit };
+    void viewport(ImTextureID texture, rhi::Extent extent, Scene &scene, SDL_Window *window,
+                  float density) noexcept;
+    void file_actions() noexcept;
+    void request_action(Action action) noexcept;
+    void perform_action(Action action) noexcept;
+    void save_level(bool save_as = false) noexcept;
+    void select_entity(EntityHandle entity, SelectionMode mode = SelectionMode::replace) noexcept;
+    void finish_edit(bool cancel = false) noexcept;
+    void erase_selection() noexcept;
+    void undo(bool redo = false) noexcept;
+    void begin_transform_edit(const char *label) noexcept;
+    void gizmo(const ImVec2 &origin, const ImVec2 &size, float aspect) noexcept;
+    void preview_details(const Actor &actor) noexcept;
+    bool selection_locked() const noexcept;
+    Vec3 selection_center() const noexcept;
     void telemetry() noexcept;
     void graph() noexcept;
     void outliner(Scene &scene) noexcept;
@@ -54,14 +79,31 @@ class Workspace final {
     void log(const char *text) noexcept;
     void play(Scene &scene) noexcept;
     void stop(Scene &scene) noexcept;
+    EditorDocument &document_;
+    Scene &scene_;
+    FileDialogs files_{};
+    SDL_Window *main_window_ = nullptr;
     Camera camera_{};
     EntityHandle selected_{};
     std::array<char, 128> actor_search_{}, asset_search_{}, command_{};
     std::array<std::array<char, 160>, 64> log_{};
     std::uint32_t log_cursor_ = 0, log_count_ = 0;
-    std::array<Actor, 256> snapshot_{};
-    std::array<EntityHandle, 256> snapshot_handles_{};
-    std::size_t snapshot_count_ = 0;
+    std::array<Actor, 256> edit_actors_{};
+    std::array<EntityHandle, 256> edit_handles_{};
+    std::size_t edit_count_ = 0;
+    Actor edit_primary_{};
+    Mat4 gizmo_start_{}, gizmo_current_{};
+    bool gizmo_edit_ = false, details_edit_ = false;
+    TransformTool tool_ = TransformTool::move;
+    bool local_space_ = false, marquee_ = false;
+    ImVec2 marquee_start_{};
+    float translate_step_ = 10, rotate_step_ = 15, scale_step_ = 0.25F;
+    std::array<char, 1024> recovery_path_{};
+    std::array<char, 64> group_name_{"Group"};
+    bool persistent_ = false, recovery_available_ = false, unsaved_prompt_ = false, group_prompt_ = false;
+    Action pending_action_ = Action::none, after_save_ = Action::none;
+    double autosave_elapsed_ = 0;
+    int ribbon_ = 0;
     float mouse_x_ = 0, mouse_y_ = 0;
     std::uint32_t flight_window_ = 0;
     bool playing_ = false, ejected_ = false, flying_ = false, grid_ = true, lit_ = true,
