@@ -4,6 +4,85 @@
 #include <new>
 #include <souls/scene/Scene.hpp>
 namespace souls {
+namespace {
+float primitive_hit(ActorKind kind, Vec3 o, Vec3 r) noexcept {
+    if (kind == ActorKind::plane) {
+        if (std::abs(r.z) < 1e-6F)
+            return -1;
+        const float t = -o.z / r.z;
+        const auto p = o + r * t;
+        return t >= 0 && std::abs(p.x) <= 1 && std::abs(p.y) <= 1 ? t : -1;
+    }
+    float closest = 1000;
+    const auto sphere = [&](Vec3 center, float radius, int hemisphere) {
+        const Vec3 origin = o - center;
+        const float aa = dot(r, r), bb = dot(origin, r), cc = dot(origin, origin) - radius * radius;
+        const float discriminant = bb * bb - aa * cc;
+        if (aa < 1e-12F || discriminant < 0)
+            return;
+        const float root = std::sqrt(discriminant);
+        for (float t : {(-bb - root) / aa, (-bb + root) / aa}) {
+            const float z = origin.z + r.z * t;
+            if (t >= 0 && t < closest && (hemisphere == 0 || z * static_cast<float>(hemisphere) >= 0))
+                closest = t;
+        }
+    };
+    if (kind == ActorKind::sphere) {
+        sphere({}, 1, 0);
+        return closest < 1000 ? closest : -1;
+    }
+    if (kind == ActorKind::cylinder || kind == ActorKind::capsule) {
+        const bool capsule = kind == ActorKind::capsule;
+        const float radius = capsule ? 0.5F : 1.0F, half = capsule ? 0.5F : 1.0F;
+        const float aa = r.x * r.x + r.y * r.y, bb = o.x * r.x + o.y * r.y;
+        const float cc = o.x * o.x + o.y * o.y - radius * radius, disc = bb * bb - aa * cc;
+        if (aa > 1e-12F && disc >= 0) {
+            const float root = std::sqrt(disc);
+            for (float t : {(-bb - root) / aa, (-bb + root) / aa})
+                if (t >= 0 && t < closest && std::abs(o.z + r.z * t) <= half)
+                    closest = t;
+        }
+        if (capsule) {
+            sphere({0, 0, half}, radius, 1);
+            sphere({0, 0, -half}, radius, -1);
+        } else if (std::abs(r.z) > 1e-6F) {
+            for (float z : {-half, half}) {
+                const float t = (z - o.z) / r.z;
+                const auto p = o + r * t;
+                if (t >= 0 && t < closest && p.x * p.x + p.y * p.y <= radius * radius)
+                    closest = t;
+            }
+        }
+        return closest < 1000 ? closest : -1;
+    }
+    float near = 0, far = 1000;
+    const float origins[]{o.x, o.y, o.z}, dirs[]{r.x, r.y, r.z};
+    for (int i = 0; i < 3; ++i) {
+        if (std::abs(dirs[i]) < 1e-6F) {
+            if (std::abs(origins[i]) > 1)
+                return -1;
+        } else {
+            float lower = (-1 - origins[i]) / dirs[i], upper = (1 - origins[i]) / dirs[i];
+            if (lower > upper)
+                std::swap(lower, upper);
+            near = std::max(near, lower);
+            far = std::min(far, upper);
+        }
+    }
+    if (kind == ActorKind::wedge) {
+        // Clip the cube interval against the wedge's sloping top, z <= x.
+        const float origin = o.z - o.x, direction = r.z - r.x;
+        if (std::abs(direction) < 1e-6F) {
+            if (origin > 0)
+                return -1;
+        } else if (direction < 0)
+            near = std::max(near, -origin / direction);
+        else
+            far = std::min(far, -origin / direction);
+    }
+    return far >= near ? near : -1;
+}
+} // namespace
 struct ActorMetadata {
     std::array<char, 64> label{};
     ActorKind kind = ActorKind::cube;
@@ -12,6 +91,8 @@ struct ActorMetadata {
     Vec3 color{1, 0.95F, 0.84F};
     EntityHandle handle{};
     std::uint32_t material = 0;
+    std::array<char, 64> group{};
+    bool locked = false;
 };
 struct Scene::Impl {
     ecs_world_t *world = nullptr;
@@ -108,6 +189,7 @@ Result<EntityHandle> Scene::add(Transform transform, float radius, std::uint32_t
     ecs_set_id(p.world, entity, p.components[4], sizeof(material), &material);
     ActorMetadata a{};
     a.handle = *handle;
+    a.material = material;
     std::snprintf(a.label.data(), a.label.size(), "Actor_%u", handle->index);
     ecs_set_id(p.world, entity, p.metadata, sizeof(a), &a);
     const float extra[]{transform.rotation.x, transform.rotation.y, transform.rotation.z,
@@ -207,6 +289,8 @@ Result<Actor> Scene::actor(EntityHandle h) const noexcept {
     a.attenuation = meta.attenuation;
     a.color = meta.color;
     a.material = meta.material;
+    a.group = meta.group;
+    a.locked = meta.locked;
     a.transform.x = *static_cast<const float *>(ecs_get_id(impl_->world, *id, impl_->components[0]));
     a.transform.y = *static_cast<const float *>(ecs_get_id(impl_->world, *id, impl_->components[1]));
     a.transform.z = *static_cast<const float *>(ecs_get_id(impl_->world, *id, impl_->components[2]));
@@ -229,19 +313,34 @@ Result<void> Scene::update(EntityHandle h, const Actor &a) noexcept {
         if (!std::isfinite(f))
             return std::unexpected(Error{ErrorCode::invalid_argument, "Non-finite transform"});
     if (std::abs(t.scale.x) < 0.001F || std::abs(t.scale.y) < 0.001F || std::abs(t.scale.z) < 0.001F ||
-        !std::isfinite(a.intensity) || a.intensity < 0)
+        !std::isfinite(a.intensity) || a.intensity < 0 || !std::isfinite(a.attenuation) || a.attenuation < 0)
         return std::unexpected(Error{ErrorCode::invalid_argument, "Invalid scale or light intensity"});
-    if (static_cast<std::uint32_t>(a.kind) > static_cast<std::uint32_t>(ActorKind::floor) ||
-        !std::isfinite(a.color.x) || !std::isfinite(a.color.y) || !std::isfinite(a.color.z) ||
-        a.color.x < 0 || a.color.y < 0 || a.color.z < 0)
+    if (static_cast<std::uint32_t>(a.kind) >= actor_kind_count || !std::isfinite(a.color.x) ||
+        !std::isfinite(a.color.y) || !std::isfinite(a.color.z) || a.color.x < 0 || a.color.y < 0 ||
+        a.color.z < 0)
         return std::unexpected(Error{ErrorCode::invalid_argument, "Invalid actor kind or color"});
     ActorMetadata meta{a.label, a.kind, a.visible, a.intensity, a.attenuation, a.color, h, a.material};
     meta.label.back() = 0;
-    const auto parent =
+    meta.group = a.group;
+    meta.group.back() = 0;
+    meta.locked = a.locked;
+    auto parent =
         (a.kind == ActorKind::light || a.kind == ActorKind::sky) ? impl_->lighting : impl_->geometry;
+    if (meta.group[0]) {
+        auto folder = ecs_lookup_child(impl_->world, parent, meta.group.data());
+        if (!folder) {
+            // Folder creation is a structural editor operation; stored transforms remain world-space.
+            ecs_entity_desc_t desc{};
+            desc.parent = parent;
+            desc.name = meta.group.data();
+            folder = ecs_entity_init(impl_->world, &desc);
+        }
+        parent = folder;
+    }
     if (ecs_get_target(impl_->world, *id, EcsChildOf, 0) != parent)
         ecs_add_pair(impl_->world, *id, EcsChildOf, parent);
     ecs_set_id(impl_->world, *id, impl_->metadata, sizeof(meta), &meta);
+    ecs_set_id(impl_->world, *id, impl_->components[4], sizeof(a.material), &a.material);
     for (std::size_t i = 0; i < 3; ++i)
         ecs_set_id(impl_->world, *id, impl_->components[i], sizeof(float), &v[i]);
     for (std::size_t i = 0; i < 6; ++i)
@@ -249,7 +348,7 @@ Result<void> Scene::update(EntityHandle h, const Actor &a) noexcept {
     return {};
 }
 Result<EntityHandle> Scene::spawn(ActorKind kind, const char *label, Transform t) noexcept {
-    auto h = add(t, kind == ActorKind::sphere ? 1.0F : 1.732F, static_cast<std::uint32_t>(kind));
+    auto h = add(t, kind == ActorKind::sphere ? 1.0F : 1.732F, kind == ActorKind::sphere ? 1U : 0U);
     if (!h)
         return h;
     auto a = actor(*h);
@@ -310,7 +409,7 @@ EntityHandle Scene::pick(const Camera &camera, Vec3 ray) const noexcept {
     EntityHandle selected{};
     for (auto h : actors()) {
         const auto a = actor(h);
-        if (!a || !a->visible || (a->kind != ActorKind::cube && a->kind != ActorKind::sphere))
+        if (!a || !a->visible || a->locked || !is_primitive(a->kind))
             continue;
         const auto &t = a->transform;
         const auto rotation = model_matrix({}, t.rotation, {1, 1, 1});
@@ -323,32 +422,7 @@ EntityHandle Scene::pick(const Camera &camera, Vec3 ray) const noexcept {
         };
         // Leave the local ray unnormalized so hit distances remain comparable across scaled actors.
         const auto o = local(d), r = local(ray);
-        float hit = -1;
-        if (a->kind == ActorKind::sphere) {
-            float aa = dot(r, r), bb = dot(o, r), cc = dot(o, o) - 1, disc = bb * bb - aa * cc;
-            if (disc >= 0) {
-                hit = (-bb - std::sqrt(disc)) / aa;
-                if (hit < 0)
-                    hit = (-bb + std::sqrt(disc)) / aa;
-            }
-        } else {
-            float near = 0, far = 1000;
-            const float origins[]{o.x, o.y, o.z}, dirs[]{r.x, r.y, r.z};
-            for (int i = 0; i < 3; ++i) {
-                if (std::abs(dirs[i]) < 1e-6F) {
-                    if (std::abs(origins[i]) > 1)
-                        far = -1;
-                } else {
-                    float l = (-1 - origins[i]) / dirs[i], u = (1 - origins[i]) / dirs[i];
-                    if (l > u)
-                        std::swap(l, u);
-                    near = std::max(near, l);
-                    far = std::min(far, u);
-                }
-            }
-            if (far >= near)
-                hit = near;
-        }
+        const float hit = primitive_hit(a->kind, o, r);
         if (hit >= 0 && hit < closest) {
             closest = hit;
             selected = h;

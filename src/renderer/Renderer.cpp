@@ -80,7 +80,78 @@ Result<void> Renderer::initialize() noexcept {
             for (auto i : {a, b, a + 1, a + 1, b, b + 1})
                 indices.push_back(i);
         }
-    return upload(1, sphere, indices);
+    if (auto ready = upload(1, sphere, indices); !ready)
+        return ready;
+
+    // The same vertex contract serves every built-in part. Temporary vectors are
+    // startup storage; GPU recording only sees the uploaded, immutable meshes.
+    std::vector<rhi::Vertex> parts;
+    std::vector<std::uint32_t> triangles;
+    const auto triangle = [&](Vec3 a, Vec3 b, Vec3 c) {
+        const auto first = static_cast<std::uint32_t>(parts.size());
+        const auto normal = normalize(cross(b - a, c - a));
+        for (auto p : {a, b, c})
+            parts.push_back({p, normal});
+        for (auto i : {first, first + 1, first + 2})
+            triangles.push_back(i);
+    };
+    constexpr std::uint32_t sides = 48;
+    for (std::uint32_t i = 0; i < sides; ++i) {
+        const float a = 2 * pi * static_cast<float>(i) / sides;
+        const float b = 2 * pi * static_cast<float>(i + 1) / sides;
+        Vec3 n0{std::cos(a), std::sin(a), 0}, n1{std::cos(b), std::sin(b), 0};
+        auto first = static_cast<std::uint32_t>(parts.size());
+        parts.push_back({n0 + Vec3{0, 0, -1}, n0});
+        parts.push_back({n1 + Vec3{0, 0, -1}, n1});
+        parts.push_back({n1 + Vec3{0, 0, 1}, n1});
+        parts.push_back({n0 + Vec3{0, 0, 1}, n0});
+        for (auto j : {0U, 1U, 2U, 0U, 2U, 3U})
+            triangles.push_back(first + j);
+        triangle({0, 0, 1}, n0 + Vec3{0, 0, 1}, n1 + Vec3{0, 0, 1});
+        triangle({0, 0, -1}, n1 + Vec3{0, 0, -1}, n0 + Vec3{0, 0, -1});
+    }
+    if (auto ready = upload(2, parts, triangles); !ready)
+        return ready;
+    parts.clear();
+    triangles.clear();
+    const Vec3 a{-1, -1, -1}, b{1, -1, -1}, c{1, 1, -1}, d{-1, 1, -1}, e{1, -1, 1}, f{1, 1, 1};
+    triangle(a, c, b);
+    triangle(a, d, c);
+    triangle(b, c, f);
+    triangle(b, f, e);
+    triangle(a, e, f);
+    triangle(a, f, d);
+    triangle(a, b, e);
+    triangle(d, f, c);
+    if (auto ready = upload(3, parts, triangles); !ready)
+        return ready;
+    parts.clear();
+    triangles.clear();
+    constexpr std::uint32_t half_rings = 12;
+    for (std::uint32_t row = 0; row <= 2 * half_rings + 1; ++row) {
+        const bool upper = row <= half_rings;
+        const float theta =
+            upper ? pi * 0.5F * static_cast<float>(row) / half_rings
+                  : pi * 0.5F + pi * 0.5F * static_cast<float>(row - half_rings - 1) / half_rings;
+        for (std::uint32_t sector = 0; sector <= sectors; ++sector) {
+            const float phi = 2 * pi * static_cast<float>(sector) / sectors;
+            Vec3 n{std::sin(theta) * std::cos(phi), std::sin(theta) * std::sin(phi), std::cos(theta)};
+            parts.push_back({n * 0.5F + Vec3{0, 0, upper ? 0.5F : -0.5F}, n});
+        }
+    }
+    for (std::uint32_t row = 0; row < 2 * half_rings + 1; ++row)
+        for (std::uint32_t sector = 0; sector < sectors; ++sector) {
+            const auto top = row * (sectors + 1) + sector, bottom = top + sectors + 1;
+            for (auto i : {top, bottom, top + 1, top + 1, bottom, bottom + 1})
+                triangles.push_back(i);
+        }
+    if (auto ready = upload(4, parts, triangles); !ready)
+        return ready;
+    parts.clear();
+    triangles.clear();
+    triangle({-1, -1, 0}, {1, -1, 0}, {1, 1, 0});
+    triangle({-1, -1, 0}, {1, 1, 0}, {-1, 1, 0});
+    return upload(5, parts, triangles);
 }
 Result<void> Renderer::resize_viewport(rhi::Extent extent) noexcept {
     if (extent == extent_ || !extent.width || !extent.height)
@@ -100,7 +171,8 @@ Result<void> Renderer::resize_viewport(rhi::Extent extent) noexcept {
     return {};
 }
 Result<void> Renderer::record(rhi::CommandList list, const Scene &scene, const RenderBatch &batch,
-                              const Camera &camera, EntityHandle selected, bool grid, bool lit) noexcept {
+                              const Camera &camera, EntityHandle selected, bool grid, bool lit,
+                              std::span<const EntityHandle> selection) noexcept {
     if (!target_ || !mesh_pipeline_)
         return std::unexpected(Error{ErrorCode::invalid_handle, "Renderer not initialized"});
     const float aspect = static_cast<float>(extent_.width) / static_cast<float>(extent_.height);
@@ -150,14 +222,17 @@ Result<void> Renderer::record(rhi::CommandList list, const Scene &scene, const R
     ++draws_;
     for (std::size_t i = 0; i < batch.x.size(); ++i) {
         auto kind = static_cast<ActorKind>(batch.kind[i]);
-        if (!batch.visible[i] || (kind != ActorKind::cube && kind != ActorKind::sphere))
+        if (!batch.visible[i] || !is_primitive(kind))
             continue;
         draw.model = model_matrix({batch.x[i], batch.y[i], batch.z[i]},
                                   {batch.rotation[0][i], batch.rotation[1][i], batch.rotation[2][i]},
                                   {batch.scale[0][i], batch.scale[1][i], batch.scale[2][i]});
         draw.color = {batch.color[0][i], batch.color[1][i], batch.color[2][i], 1};
-        draw.flags = {batch.handles[i] == selected ? 1.0F : 0.0F, 0, 0, 0};
-        const auto &mesh = meshes_[kind == ActorKind::cube ? 0 : 1];
+        const bool highlighted =
+            batch.handles[i] == selected ||
+            std::find(selection.begin(), selection.end(), batch.handles[i]) != selection.end();
+        draw.flags = {highlighted ? 1.0F : 0.0F, 0, 0, 0};
+        const auto &mesh = meshes_[primitive_mesh_index(kind)];
         if (auto ready =
                 device_.draw_geometry(list, mesh_pipeline_, mesh.vertices, mesh.indices, mesh.count, draw);
             !ready)

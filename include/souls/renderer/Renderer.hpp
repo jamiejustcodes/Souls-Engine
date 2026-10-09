@@ -10,7 +10,7 @@ class Renderer final {
     [[nodiscard]] Result<void> resize_viewport(rhi::Extent extent) noexcept;
     [[nodiscard]] Result<void> record(rhi::CommandList list, const Scene &scene, const RenderBatch &batch,
                                       const Camera &camera, EntityHandle selected = {}, bool grid = true,
-                                      bool lit = true) noexcept;
+                                      bool lit = true, std::span<const EntityHandle> selection = {}) noexcept;
     [[nodiscard]] std::uint32_t draws() const noexcept {
         return draws_;
     }
@@ -30,7 +30,7 @@ class Renderer final {
         rhi::BufferHandle vertices{}, indices{};
         std::uint32_t count = 0;
     };
-    std::array<Mesh, 2> meshes_{};
+    std::array<Mesh, 6> meshes_{};
     rhi::PipelineHandle mesh_pipeline_{}, grid_pipeline_{};
     std::uint32_t draws_ = 0;
 };

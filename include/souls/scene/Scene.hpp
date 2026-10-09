@@ -9,7 +9,20 @@ struct Transform {
     float x = 0, y = 0, z = 0;
     Vec3 rotation{}, scale{1, 1, 1};
 };
-enum class ActorKind : std::uint32_t { cube, sphere, light, sky, floor };
+enum class ActorKind : std::uint32_t { cube, sphere, light, sky, floor, cylinder, wedge, capsule, plane };
+inline constexpr std::uint32_t actor_kind_count = 9;
+inline constexpr bool is_primitive(ActorKind kind) noexcept {
+    return kind == ActorKind::cube || kind == ActorKind::sphere ||
+           (kind >= ActorKind::cylinder && kind <= ActorKind::plane);
+}
+inline constexpr std::size_t primitive_mesh_index(ActorKind kind) noexcept {
+    return kind == ActorKind::cube ? 0 : (kind == ActorKind::sphere ? 1 : static_cast<std::size_t>(kind) - 3);
+}
+inline constexpr Vec3 primitive_bounds(ActorKind kind) noexcept {
+    return kind == ActorKind::capsule ? Vec3{0.5F, 0.5F, 1}
+           : kind == ActorKind::plane ? Vec3{1, 1, 0.01F}
+                                      : Vec3{1, 1, 1};
+}
 struct Actor {
     std::array<char, 64> label{};
     Transform transform{};
@@ -18,6 +31,8 @@ struct Actor {
     float intensity = 100000, attenuation = 0;
     Vec3 color{1, 0.95F, 0.84F};
     std::uint32_t material = 0;
+    std::array<char, 64> group{};
+    bool locked = false;
 };
 struct RenderBatch {
     std::span<float> x, y, z, radius;
