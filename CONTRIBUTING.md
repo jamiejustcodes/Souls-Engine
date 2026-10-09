@@ -14,6 +14,11 @@ synchronization, or a decision that would otherwise be easy to misread.
 - Preserve generation checks and retirement rules when changing resource pools,
   command tokens, frame arenas, or mapped GPU constants.
 - Keep UI code dependent on engine interfaces rather than native SDK objects.
+- Route editor mutations through EditorDocument. UI adapters own gesture state;
+  the document owns selection, stable IDs, history, persistence and simulation
+  snapshots. Keep transform/placement math independent of SDL and ImGui.
+- Keep groups as logical folders with world-space transforms. See
+  [the editor document decision](docs/adr/0001-editor-document.md).
 
 ## Validation
 

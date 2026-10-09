@@ -1,40 +1,39 @@
-# Phase 2 verification — 8 October 2026
+# World-building verification � 9 October 2026
 
-Host: Windows x64, MSVC19.51, CMake4.4, NVIDIA GeForce RTX3060Ti.
+Host: Windows x64, MSVC 19.51, CMake 4.4, NVIDIA GeForce RTX 3060 Ti.
 First-party targets use C++23, `/W4 /WX /permissive-`, and disabled exceptions.
-This report separates compilation, runtime checks and manual inspection.
 
 | Check | Evidence |
 |---|---|
-| Full Debug build | Passed, including production D3D12 editor/runtime |
-| Vulkan source checks | Backend and UI bridge compiled on Windows |
-| Shader checks | All four HLSL entries compiled to DXIL and SPIR-V; reflected vertex locations0/1, uniform set0/binding0, frame offsets0–240 and object offsets0/64/80 match C++ |
-| Debug CTest | 6/6 passed with the optional Vulkan GPU check enabled |
-| ASan build/tests | 6/6 passed with the optional Vulkan GPU check enabled |
-| D3D12 validation | Editor/runtime 120-frame smoke passes; editor additionally completed 600 frames under ASan |
-| Vulkan GPU smoke | Optional Windows Vulkan runtime completed 120 frames and both resizes on the NVIDIA driver |
-| Vulkan readback | Engine-owned offscreen color captured; cube, sphere, grid, depth and directional shading inspected |
-| Scene contracts | Generation safety, duplicate/delete, visible/hidden transformed picking, invalid transforms, SoA live values, view/projection checks passed |
-| Editor workflow | Smoke exercises select/edit, duplicate/delete, simulation snapshot, temporary actor removal and Stop restore |
-| Allocation guard | 2000 live transform updates and SoA extractions: zero C++/Flecs allocation attempts |
-| Visual QA | Direct D3D12 GPU readback of the complete editor: ribbon, selected actor, axis gizmo, XYZ Details, content tree/tiles and shared developer tabs |
+| Full Windows Debug build | Passed: D3D12 editor/runtime, Vulkan source/UI checks and DXIL/SPIR-V shader compilation |
+| Windows Debug CTest | 10/10 passed, including the optional Windows Vulkan runtime smoke |
+| Windows ASan | 10/10 passed; editor also completed 600 validation frames and both resizes |
+| Document contracts | Transaction coalescing/cancel, undo/redo, branching and eviction, clean/dirty revisions, stable IDs and selection restoration |
+| Level files | All actor kinds, 256-actor capacity, Unicode paths, save/load path aliasing, recovery, and malformed-file rejection without replacing the current world |
+| Primitive contracts | Six shape-aware ray intersections, transformed bounds, locked picking, logical groups and material SoA updates |
+| Transform tools | Mirrored/nonuniform TRS, Euler gimbal cases, shared-pivot rotation/scale, singular/shear rejection and snapped elevated/rotated-floor placement |
+| Actual widget gestures | Headless ImGui/ImGuizmo mouse press/drag/release for move, rotate and scale using the engine camera; active-gesture cancellation |
+| Integrated editor smoke | Coalesced Details edits undo/redo, duplication, simulation restoration and temporary actor removal; all six meshes render |
+| Allocation guard | 2000 live scene transform updates and SoA extractions with zero C++/Flecs allocation attempts |
+| Visual QA | Direct D3D12 GPU readback: docked workspace, tabs, inspector, orientation/transform gizmos and six part thumbnails |
+
+[Implementation CI run](https://github.com/jamiejustcodes/Souls-Engine/actions/runs/37867036927)
+passed Windows MSVC, Linux GCC 14 and Linux Clang 19. Both Linux jobs built with
+ASan/UBSan, passed the seven non-GPU contracts and ran the runtime and editor for
+120 frames under Xvfb/Mesa with Vulkan validation enabled. The final revision is
+also covered by the repository's [verification workflow](https://github.com/jamiejustcodes/Souls-Engine/actions/workflows/verify.yml).
 
 D3D12 validation errors and Vulkan validation callbacks fail the smoke harness.
-The Windows Vulkan smoke ran without validation: this host does not have
-`VK_LAYER_KHRONOS_validation`. Requesting it returns an explicit install error.
-Linux GCC/Clang, Linux window systems, Linux ASan/UBSan and Linux Vulkan/editor
-execution have not run locally because no Linux/WSL environment is installed.
-The existing Ubuntu CI jobs configure/build the Linux sanitizer preset and run
-both shells with Mesa and Vulkan validation under Xvfb. Their results remain
-pending until CI executes. Windows Vulkan rendering does not certify Linux.
+The optional Windows Vulkan runtime smoke uses this host's NVIDIA driver without
+`VK_LAYER_KHRONOS_validation`; the Linux CI runs supply that validation coverage.
+Third-party libraries retain their own warning/sanitizer policies. Engine and
+shell code is instrumented. The allocation guard covers scene operations and
+extraction, not ImGui, SDL, native dialogs, file I/O, or driver allocations.
 
-ASan runtime DLLs deploy beside every test executable, including the optional
-Vulkan check. Third-party source libraries retain their own warning/sanitizer
-policies. First-party engine and shells are instrumented. The allocation guard
-covers engine scene operations, not allocations internal to ImGui, SDL or drivers.
-The direct GPU captures are `build/editor-playground.png` and
-`build/vulkan-playground.png`; they contain engine output, not desktop content.
-Frame/FPS numbers in captures are live measurements, not benchmark claims.
+The committed editor image is an engine GPU capture, not desktop content. Its
+frame/FPS readings are live telemetry rather than benchmark claims. Smoke tests
+add four parts to exercise every mesh; normal launch starts with the two original
+playground primitives. Smoke mode disables user preference/recovery access.
 
 ## Reproduce
 
@@ -52,23 +51,29 @@ ctest --test-dir build/windows-asan -C Debug --output-on-failure
 .\build\windows-asan\Debug\SoulsEditor.exe --validation --smoke 600
 ```
 
-## Manual interaction checks
+## Remaining human UI/device checks
 
-These are the remaining human UI/device checks; controller-level smoke does
-not emulate every mouse action. Verify RMB flight, wheel speed, Q/E and Shift;
-click X/Y/Z to align, click either mesh to select, and F to focus. Confirm typing
-F in actor labels or search never moves the camera. Rename, hide, duplicate and
-delete via Outliner; edit XYZ, snapping, mesh/material slots, color and sun lux.
-Play, pause, eject, edit and stop; confirm edit-world restoration. Filter folders
-and assets and double-click a mesh tile to place it. Open Output Log while
-Telemetry is already visible: it should activate Log and keep the tools open.
-Collapse/reopen Content Browser; use Window to toggle tools. Detach/redock,
-close detached panels, minimize/restore, and move between monitors with different
-DPI. Resize down to the supported DPI-scaled minimum. Linux rendering and input
-checks must also run on a Linux display or Xvfb where applicable.
+Automated tests drive the actual gizmo widget, document transactions and graphics
+smoke paths. They do not automate the operating system's file-picker UI or every
+docking/input combination. Verify these on the supported desktop environments:
 
-Current stage implements built-in meshes/material instances, Blinn-Phong shading,
-procedural sky/grid, depth, static backend dispatch and explicit uploads. Full
-landscape sculpting, modeling topology, imported assets, calibrated physical
-exposure, shadows, deferred passes, undo/save and shader authoring remain later
-stages; none are presented as completed production features.
+- RMB flight, vertical movement, boost, wheel speed and F focus; Q/W/E/R tool
+  shortcuts must not interfere with typing or flight.
+- Ctrl/Shift multi-selection, empty-space marquee, axis/plane/ring gestures,
+  local/world mode, snapping, Escape cancellation and focus-loss cancellation.
+- Drag a part from Build and Content Browser. Confirm the preview, floor alignment,
+  delivery, selection, single undo, and redo. Numeric multi-edit should stay relative.
+- Rename, hide, duplicate, delete, group/ungroup and lock/unlock through Outliner.
+  Double-click a group to select its members. Undo/redo should restore values and IDs.
+- Native Open/Save/Save As, cancelled picker, inaccessible destination and malformed
+  files. A failed action should display an error and keep the current world.
+- Close/new/open with dirty state: Save/Discard/Cancel, including cancelling Save As.
+  Idle recovery, next-launch Restore/Discard/Keep, and saving a restored unnamed level.
+- Play, pause, eject, edit and stop; confirm the edit-world history and selection return.
+- Content/tool tabs, detach/redock, detached-window close, minimize/restore,
+  minimum-size ribbon layout, and mixed-DPI monitor transitions.
+
+Imported assets, shadows, deferred targets, physically calibrated PBR exposure,
+physics, scripting, landscape sculpting and topology authoring remain future
+rendering/editor milestones. This milestone delivers the built-in world-building
+workflow and level persistence.

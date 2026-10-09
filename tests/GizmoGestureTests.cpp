@@ -74,8 +74,11 @@ int main() {
         frame(operation, {hit.x + 32, hit.y + 20}, false);
         check(changed, "drag modifies the transform");
         check(!ImGuizmo::IsUsing(), "release finishes the gesture");
+        matrix = Mat4::identity();
+        frame(operation, hit, false);
         frame(operation, hit, false);
         frame(operation, hit, true);
+        check(ImGuizmo::IsUsing(), "press starts the gesture that will be cancelled");
         // A cancelled document gesture must also release the widget's internal drag.
         ImGuizmo::Enable(false);
         check(!ImGuizmo::IsUsing(), "disabling the widget cancels its active gesture");
