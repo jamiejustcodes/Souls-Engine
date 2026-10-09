@@ -11,3 +11,6 @@
 | Recovery level | Periodic per-user snapshot, restored as an unsaved level. |
 | Simulation world | Temporary state that Stop replaces with the edit-world snapshot. |
 | Part | One of six built-in static primitive meshes. |
+| Demo session | The bounded 120 Hz controller, course rules and camera borrowing an isolated scene. |
+| Demo world | The separate Flecs scene used for Souls Courtyard, independent of the editor document. |
+| Editable template | A validated scene installed as a fresh unsaved editor document. |

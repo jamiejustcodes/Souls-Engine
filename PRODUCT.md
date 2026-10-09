@@ -5,7 +5,9 @@ Native desktop: Windows and Linux, SDL3 and Dear ImGui.
 
 ## Users and purpose
 Game engine developers inspecting real-time rendering, scene data and frame budgets.
-Phase 2 adds a live primitive playground and a UE5-style actor-editing workspace.
+A UE5-style editing workspace pairs with approachable studio building tools.
+Startup opens Souls Courtyard, a playable third-person course; the editor remains
+one click away and can open the course geometry for editing.
 
 ## Constraints
 D3D12 with Agility on Windows; Vulkan 1.3 on Linux. Static backend selection,
@@ -21,3 +23,6 @@ high contrast, DPI awareness, 8px grid and a dockable professional workspace.
 Indexed 3D meshes, camera/light constants, depth and a procedural grid are available. GBuffer, shadows, shader authoring,
 GPU-driven scene rendering and full pass timelines belong to later stages.
 Do not present absent passes or illustrative GPU performance as live results.
+
+The maintainer-supplied black-and-white Souls crest/wordmark is the official
+artwork. Preserve the PNG; crop the crest only for compact UI and window icons.

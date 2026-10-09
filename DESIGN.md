@@ -32,3 +32,17 @@ floor shading is infinite and pixel filtered. The pass graph describes grid,
 indexed geometry, viewport sampling and presentation. This stage implements
 Blinn-Phong lighting and procedural sky color, with no claims of deferred
 GBuffer, shadow maps, full landscape sculpting or mesh topology authoring.
+
+Startup uses a dedicated playable canvas. The crest and course name anchor a
+60px toolbar; Open editor, Edit demo, Restart and About remain visible above the
+game. An objective HUD shows real collectible/checkpoint state. A compact
+start/pause card explicitly captures the mouse; Esc releases it. The control
+strip explains movement. The editor retains its layout and has a persistent
+green Play demo action, separate from primitive rotation Simulate.
+
+The complete original logo is embedded and shown in About. A presentation-only
+crest crop works at menu size; the native window icon uses the same region. The
+brand texture has its own lifetime, independent of resizable scene targets.
+Neutral hover colors reduce competing highlights; violet marks active tools and
+green identifies gameplay. The bottom dock occupies 22% of the default workspace.
+Outliner and Details split the right column 45/55, with scrolling inspection.

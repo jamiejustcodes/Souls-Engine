@@ -1,16 +1,21 @@
 # Souls Engine
 
+<p><img src="assets/branding/souls-engine.png" alt="Souls Engine logo" width="240"></p>
+
 [![Foundation verification](https://github.com/jamiejustcodes/Souls-Engine/actions/workflows/verify.yml/badge.svg)](https://github.com/jamiejustcodes/Souls-Engine/actions/workflows/verify.yml)
 
 Souls Engine is a C++23 game engine for Windows and Linux, built around explicit
 graphics APIs and a dockable desktop editor. The current development milestone
-is the interactive world-building editor: six built-in parts, viewport gizmos,
-transactional undo/redo, level files, and live scene editing through Flecs.
+is Souls Courtyard: a playable platforming course available at startup, alongside
+six built-in parts, viewport gizmos, transactional undo/redo, level files and live
+scene editing through Flecs.
 
 Windows uses Direct3D 12 with the Agility SDK and enhanced barriers. Linux uses
 Vulkan 1.3 with synchronization2 and dynamic rendering. The backend is selected at
 compile time. Shared HLSL shaders compile to DXIL or SPIR-V during the build and
 are embedded in the executable.
+
+![Souls Courtyard running inside the branded engine shell](docs/images/souls-courtyard.png)
 
 ![Souls Editor with the world-building playground and actor inspector](docs/images/editor-playground.png)
 
@@ -25,7 +30,9 @@ Requires CMake 3.28+, Git, a C++23 standard library with `std::expected`, and a
 capable GPU/driver. Windows x64: Visual Studio 2026 (included preset) or VS2022
 17.10+. Linux x64: GCC14+ or Clang19+ with libstdc++14+, installed Vulkan loader
 and SDL window-system development libraries. Configure fetches pinned SDL3,
-Flecs, ImGui docking, ImPlot, ImGuizmo, Volk/Vulkan headers, Agility and DXC dependencies.
+Flecs, ImGui docking, ImPlot, ImGuizmo, Volk/Vulkan headers, Agility, DXC and stb dependencies.
+The supplied logo is embedded; launching from another working directory needs
+no asset sidecar.
 
 ```powershell
 cmake --preset windows -DSOULS_VULKAN_COMPILE_CHECK=ON
@@ -55,6 +62,30 @@ DXC 1.8.2505.32 is fetched automatically (Linux release v1.8.2505.1).
 Linux requires Vulkan1.3, timeline semaphores, sync2, dynamic rendering and a
 combined graphics/presentation queue. Unsupported devices return explicit errors.
 
+## Play Souls Courtyard
+
+The editor opens on the playable demo. Choose **Start playing** to capture the
+mouse: **WASD** moves relative to the camera, **Space** jumps, **Shift** sprints and
+the mouse orbits. **Esc** pauses and releases the cursor. Collect four gold orbs,
+cross the raised platforms and reach the final arch. Falling returns you to the
+last checkpoint; collected orbs remain collected. Restart resets the whole run.
+
+**Open editor** returns to your editing workspace. Its **Play demo** button brings
+the course back without touching your edits, selection or undo history. **Edit
+demo** opens a fresh copy of the course geometry as an unsaved level, using the
+normal Save/Discard/Cancel flow. Choose Save As to keep your version. About shows
+the complete original logo; the crest appears in the toolbar and window icon.
+
+`SoulsRuntime` starts the same course without editor chrome. Click to capture the
+mouse, use the same movement keys, and press R to restart. Progress and paused
+controls appear in its window title. Launch either executable with `--playground`
+to open the original primitive playground instead.
+
+The controller runs at 120 Hz with camera obstruction checks, swept AABB collision
+against authored platforms/walls, buffered jumping and coyote time. It is a bounded
+kinematic example; rigid bodies, arbitrary mesh collision and gameplay authoring
+for edited levels remain future work.
+
 ## Editor controls
 
 - Home/Build/Test/Tools tabs keep common actions above the UE-style docking
@@ -62,7 +93,7 @@ combined graphics/presentation queue. Unsupported devices return explicit errors
   Drag a part from Build or Content Browser onto the viewport. The wire preview
   snaps along the procedural floor and rests on its surface, including rotated
   or elevated floors. Double-click a mesh tile for placement at the world origin.
-- RMB + WASD flies; Q/E rises/descends, Shift boosts, and wheel scales speed 1–8.
+- RMB + WASD flies; Q/E rises/descends, Shift boosts, and wheel scales speed 1â€“8.
   F focuses the selection. Outside flight, Q/W/E/R selects Select/Move/Rotate/Scale
   while the viewport is hovered and text input is inactive.
 - Click geometry or an Outliner row to select. Ctrl-click toggles; Shift-click
@@ -89,7 +120,7 @@ combined graphics/presentation queue. Unsupported devices return explicit errors
   Recovery opens as an unsaved level. Keeping recovery for the next launch pauses
   replacement snapshots until a level is saved. File failures display an error dialog.
   Smoke tests never touch user recovery files.
-- Play runs primitive rotation simulation. Pause/Resume, Eject/Possess and Stop
+- Simulate runs primitive rotation simulation. Pause/Resume, Eject/Possess and Stop
   control it. Stop restores actors, selection and the edit-world history; temporary
   simulation changes never enter normal undo history. Editor documents hold 256
   actors; the underlying scene pool holds 4096.
@@ -99,7 +130,7 @@ combined graphics/presentation queue. Unsupported devices return explicit errors
   GPU time and draw counts come from the renderer. The console accepts `help`,
   `clear`, `reset`, `cube`, `sphere`.
 
-The minimum window size is 1100×720 at 100% DPI and scales with DPI. Offscreen
+The minimum window size is 1100Ã—720 at 100% DPI and scales with DPI. Offscreen
 viewports resize after retirement; minimized windows suspend rendering. Detached
 panel close stays local. Landscape and Modeling mode labels reserve workspace
 roles; sculpting and topology tools remain future work.
@@ -107,7 +138,8 @@ roles; sculpting and topology tools remain future work.
 ## Rendering and memory contracts
 
 `SoulsCore`, `SoulsScene`, `SoulsRHI`, `SoulsRenderer`, `SoulsRuntime` and
-`SoulsEditor`, `SoulsEditorDocument` and `SoulsEditorTools` have separate targets and headers. No runtime backend vtable or
+`SoulsEditor`, `SoulsEditorDocument`, `SoulsEditorTools`, `SoulsDemo` and
+`SoulsBrand` have separate targets and headers. No runtime backend vtable or
 exceptions exist in engine code. Native graphics APIs retain their own dispatch.
 Generation-indexed buffers, textures and pipelines reject stale handles. Resource
 creation/destruction is cold-path work; command tokens expire after submission.
@@ -141,6 +173,7 @@ ctest --test-dir build/windows-asan -C Debug --output-on-failure
 .\build\windows\Debug\SoulsRuntime.exe --validation --smoke 120
 # Direct GPU readback, independent of desktop occlusion:
 .\tools\CaptureEditor.ps1
+.\tools\CaptureEditor.ps1 -Playground -Output build/editor-playground.png
 # Dependency-free core build:
 cmake --preset core
 cmake --build --preset core
@@ -156,12 +189,17 @@ ASAN_OPTIONS=detect_leaks=0 xvfb-run -a ./build/linux-sanitize/SoulsRuntime --va
 ```
 
 `--smoke N` (N>=90) drives narrow/wide resize transitions and exits nonzero on
-failures. The editor additionally tests simulation restore, selected actor edits,
+failures. Default smoke runs move the player through the first checkpoint; the
+editor switches workspaces and checks that its edit world remains intact.
+`--playground --smoke N` retains the original grid/primitive smoke. The editor
+additionally tests simulation restore, selected actor edits,
 duplicate/delete and stale texture/buffer/pipeline handles and command tokens.
 Scene contracts cover all six primitive shapes, visibility, locks, groups, SoA
 values and camera projection. Document tests cover history branching, dirty state,
 Unicode paths, malformed files, capacity limits, recovery and simulation isolation.
-Headless ImGuizmo tests drive real mouse gestures for move, rotate and scale with
+Demo contracts complete the course using public input, test respawn and restart,
+compare simulation cadence and guard C++/Flecs allocations during play. Brand tests
+decode the embedded original PNG. Headless ImGuizmo tests drive real mouse gestures for move, rotate and scale with
 the engine camera; transform tests cover mirrored TRS and floor placement. The allocation harness measures 2000 live edits
 and extractions. `--capture path.bmp` reads frame90 through the RHI. Windows exports the main
 editor composite; Vulkan exports the last offscreen scene color, avoiding access
@@ -185,6 +223,8 @@ This exercises Vulkan on Windows and does not substitute for a Linux GPU run. Se
 | Gizmos, selection and placement | [WorkspaceViewport.cpp](src/editor/WorkspaceViewport.cpp), [TransformTools.cpp](src/editor/TransformTools.cpp) |
 | Native files and recovery | [WorkspaceFiles.cpp](src/editor/WorkspaceFiles.cpp), [FileDialogs.cpp](src/editor/FileDialogs.cpp) |
 | Outliner, Details, assets and console | [WorkspaceActors.cpp](src/editor/WorkspaceActors.cpp) |
+| Playable course and controller | [Demo.hpp](include/souls/demo/Demo.hpp), [Demo.cpp](src/demo/Demo.cpp), [WorkspaceDemo.cpp](src/editor/WorkspaceDemo.cpp) |
+| Embedded branding | [Brand.hpp](include/souls/brand/Brand.hpp), [Brand.cpp](src/brand/Brand.cpp), [EmbedBrand.cmake](cmake/EmbedBrand.cmake) |
 | Build and shader compilation | [CMakeLists.txt](CMakeLists.txt), [Shaders.cmake](cmake/Shaders.cmake), [EmbedShaders.cmake](cmake/EmbedShaders.cmake) |
 
 Development conventions are in [CONTRIBUTING.md](CONTRIBUTING.md). The editor's
@@ -194,3 +234,7 @@ constraints in [PRODUCT.md](PRODUCT.md).
 ImGuizmo is pinned to a reviewed commit and built only for its transform widget.
 Third-party licenses remain with their fetched sources; see the
 [ImGuizmo project](https://github.com/CedricGuillemet/ImGuizmo).
+
+PNG decoding uses pinned [stb_image](https://github.com/nothings/stb) (MIT or public
+domain). Artwork provenance and its presentation crop are documented in
+[assets/branding/README.md](assets/branding/README.md).
