@@ -3,12 +3,14 @@
 #include <charconv>
 #include <cstdio>
 #include <cstring>
+#include <souls/brand/Brand.hpp>
 #include <souls/rhi/SoulsRHI.hpp>
 namespace souls::platform {
 struct Options {
     std::uint32_t smoke_frames = 0;
     bool validation = false;
     bool vsync = true;
+    bool playground = false;
     const char *capture = nullptr;
 };
 inline Result<Options> options(int argc, char **argv) noexcept {
@@ -16,6 +18,8 @@ inline Result<Options> options(int argc, char **argv) noexcept {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--validation") == 0)
             result.validation = true;
+        else if (std::strcmp(argv[i], "--playground") == 0)
+            result.playground = true;
         else if (std::strcmp(argv[i], "--no-vsync") == 0)
             result.vsync = false;
         else if (std::strcmp(argv[i], "--capture") == 0 && i + 1 < argc)
@@ -28,8 +32,9 @@ inline Result<Options> options(int argc, char **argv) noexcept {
                 return std::unexpected(
                     Error{ErrorCode::invalid_argument, "--smoke requires at least 90 frames"});
         } else
-            return std::unexpected(
-                Error{ErrorCode::invalid_argument, "Usage: [--validation] [--no-vsync] [--smoke N>=90]"});
+            return std::unexpected(Error{
+                ErrorCode::invalid_argument,
+                "Usage: [--validation] [--no-vsync] [--playground] [--smoke N>=90] [--capture path.bmp]"});
     }
     return result;
 }
@@ -61,6 +66,25 @@ class Window final {
             return std::unexpected(Error{ErrorCode::platform, SDL_GetError()});
         const float scale = SDL_GetWindowDisplayScale(window_);
         if (!SDL_SetWindowMinimumSize(window_, static_cast<int>(1100 * scale), static_cast<int>(720 * scale)))
+            return std::unexpected(Error{ErrorCode::platform, SDL_GetError()});
+        return {};
+    }
+    [[nodiscard]] Result<void> set_icon(const brand::Logo &logo) noexcept {
+        // SDL copies the surface. Display the crest region; preserve the source PNG.
+        auto *source = SDL_CreateSurfaceFrom(static_cast<int>(logo.width), static_cast<int>(logo.height),
+                                             SDL_PIXELFORMAT_RGBA32, logo.pixels.get(),
+                                             static_cast<int>(logo.width * 4));
+        auto *icon = SDL_CreateSurface(320, 320, SDL_PIXELFORMAT_RGBA32);
+        if (!source || !icon) {
+            SDL_DestroySurface(source);
+            SDL_DestroySurface(icon);
+            return std::unexpected(Error{ErrorCode::platform, SDL_GetError()});
+        }
+        SDL_Rect crest{352, 113, 320, 320};
+        bool okay = SDL_BlitSurface(source, &crest, icon, nullptr) && SDL_SetWindowIcon(window_, icon);
+        SDL_DestroySurface(source);
+        SDL_DestroySurface(icon);
+        if (!okay)
             return std::unexpected(Error{ErrorCode::platform, SDL_GetError()});
         return {};
     }

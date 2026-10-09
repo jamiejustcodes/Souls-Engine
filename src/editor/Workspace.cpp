@@ -45,7 +45,7 @@ void Workspace::theme(float scale) noexcept {
     c[ImGuiCol_TitleBgActive] = rgb(43, 43, 54);
     c[ImGuiCol_MenuBarBg] = rgb(43, 43, 54);
     c[ImGuiCol_Button] = rgb(57, 57, 69);
-    c[ImGuiCol_ButtonHovered] = rgb(92, 78, 181);
+    c[ImGuiCol_ButtonHovered] = rgb(73, 73, 88);
     c[ImGuiCol_ButtonActive] = rgb(108, 92, 231);
     c[ImGuiCol_Header] = rgb(43, 43, 54);
     c[ImGuiCol_HeaderHovered] = rgb(57, 57, 69);
@@ -87,6 +87,10 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
     ImGuizmo::BeginFrame();
     file_actions();
     selected_ = document_.primary();
+    if (demo_active_) {
+        demo_view(texture, window, pixel_density);
+        return;
+    }
     ImGui::BeginDisabled(files_.pending() || unsaved_prompt_);
     if (!ImGui::GetIO().WantTextInput && !files_.pending() && !unsaved_prompt_ && !group_prompt_ &&
         !flying_ && !gizmo_edit_) {
@@ -111,7 +115,8 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
             group_prompt_ = true;
     }
     if (ImGui::BeginMainMenuBar()) {
-        ImGui::TextColored(rgb(169, 156, 255), "SOULS");
+        draw_brand(18 * dpi);
+        ImGui::SameLine();
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("New level", "Ctrl+N"))
                 request_action(Action::new_level);
@@ -162,6 +167,8 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Tools")) {
+            if (ImGui::MenuItem("Play Souls Courtyard"))
+                show_demo(true);
             if (ImGui::MenuItem("Telemetry / Render Graph / Output Log"))
                 show_tools_ = true;
             if (ImGui::MenuItem("Focus selected actor", "F") && selected_) {
@@ -191,6 +198,21 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
         ImGui::SameLine();
         ImGui::TextDisabled("%s%s", document_.path()[0] ? "Level" : "Untitled",
                             document_.dirty() ? " *" : "");
+        ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - 182 * dpi));
+        ImGui::PushStyleColor(ImGuiCol_Button, {0.10F, 0.34F, 0.22F, 1});
+        if (ImGui::Button("Play demo", {100 * dpi, 0}))
+            show_demo(true);
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        if (ImGui::Button("About"))
+            ImGui::OpenPopup("About Souls Engine");
+        if (ImGui::BeginPopup("About Souls Engine")) {
+            ImGui::Image(logo_, {304 * dpi, 204 * dpi});
+            ImGui::TextUnformatted("Souls Engine");
+            ImGui::TextDisabled("C++23 / D3D12 / Vulkan 1.3");
+            ImGui::TextWrapped("Build a scene, play the courtyard, and inspect the frame.");
+            ImGui::EndPopup();
+        }
         ImGui::Separator();
         if (ribbon_ == 1) {
             constexpr ActorKind kinds[]{ActorKind::cube,  ActorKind::sphere,  ActorKind::cylinder,
@@ -259,7 +281,7 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
         ImGui::PushStyleColor(ImGuiCol_Button, {0.10F, 0.37F, 0.22F, 1});
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, {0.14F, 0.48F, 0.29F, 1});
         ImGui::BeginDisabled(playing_);
-        if (ImGui::Button("Play", {64 * dpi, 0}))
+        if (ImGui::Button("Simulate", {80 * dpi, 0}))
             play(scene);
         ImGui::EndDisabled();
         ImGui::PopStyleColor(2);
@@ -327,9 +349,9 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
         ImGui::DockBuilderAddNode(dock, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(dock, vp->WorkSize);
         ImGuiID center = dock;
-        const auto bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27F, nullptr, &center);
+        const auto bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.22F, nullptr, &center);
         ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.24F, nullptr, &center);
-        const auto details_dock = ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.58F, nullptr, &right);
+        const auto details_dock = ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.55F, nullptr, &right);
         ImGui::DockBuilderDockWindow("Viewport", center);
         ImGui::DockBuilderDockWindow("World Outliner", right);
         ImGui::DockBuilderDockWindow("Details", details_dock);

@@ -28,6 +28,10 @@ void Workspace::request_exit() noexcept {
 void Workspace::request_action(Action action) noexcept {
     if (files_.pending() || unsaved_prompt_)
         return;
+    if (demo_capture_) {
+        SDL_SetWindowRelativeMouseMode(main_window_, false);
+        demo_capture_ = false;
+    }
     finish_edit();
     if (playing_)
         stop(scene_);
@@ -51,10 +55,42 @@ void Workspace::perform_action(Action action) noexcept {
         if (!done)
             file_error(done.error().message);
         else {
+            show_demo(false);
             selected_ = {};
             camera_ = Camera{};
             log("New playground level");
         }
+    } else if (action == Action::edit_demo) {
+        auto candidate = Scene::create();
+        if (!candidate) {
+            file_error(candidate.error().message);
+            return;
+        }
+        auto prepared = demo::Session::create(*candidate);
+        if (!prepared) {
+            file_error(prepared.error().message);
+            return;
+        }
+        for (auto h : candidate->actors()) {
+            auto actor = candidate->actor(h);
+            actor->locked = false;
+            auto done = candidate->update(h, *actor);
+            if (!done) {
+                file_error(done.error().message);
+                return;
+            }
+        }
+        auto done = document_.replace_scene(std::move(*candidate));
+        if (!done) {
+            file_error(done.error().message);
+            return;
+        }
+        show_demo(false);
+        camera_.pitch = -0.52F;
+        camera_.position = {10, -10, 12};
+        camera_.yaw = 2.07F;
+        selected_ = {};
+        log("Courtyard opened as an editable level; Save As to keep your version");
     } else if (action == Action::open_level) {
         auto done = files_.request(FileDialogKind::open, main_window_, document_.path());
         if (!done)
@@ -101,6 +137,7 @@ void Workspace::file_actions() noexcept {
             if (!done)
                 file_error(done.error().message);
             else {
+                show_demo(false);
                 selected_ = document_.primary();
                 camera_ = Camera{};
                 log("Level opened");
@@ -139,6 +176,7 @@ void Workspace::file_actions() noexcept {
         }
         ImGui::SameLine();
         if (ImGui::Button("Show Output Log")) {
+            show_demo(false);
             show_tools_ = focus_log_ = true;
             file_error_prompt_ = false;
             ImGui::CloseCurrentPopup();
@@ -182,8 +220,10 @@ void Workspace::file_actions() noexcept {
             auto done = document_.recover(recovery_path_.data());
             if (!done)
                 file_error(done.error().message);
-            else
+            else {
+                show_demo(false);
                 log("Recovery level restored");
+            }
             recovery_available_ = false;
             ImGui::CloseCurrentPopup();
         }
@@ -239,7 +279,7 @@ void Workspace::file_actions() noexcept {
                 label = at + 1;
         char title[1200]{};
         std::snprintf(title, sizeof(title), "%s%s | Souls Editor", label, document_.dirty() ? " *" : "");
-        SDL_SetWindowTitle(main_window_, title);
+        SDL_SetWindowTitle(main_window_, demo_active_ ? "Souls Courtyard | Souls Engine" : title);
     }
 }
 } // namespace souls::editor

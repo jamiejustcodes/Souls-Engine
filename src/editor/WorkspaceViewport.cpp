@@ -50,7 +50,7 @@ void Workspace::viewport(ImTextureID texture, rhi::Extent extent, Scene &scene, 
         ImGui::Checkbox("R", &rotate_snap_);
         ImGui::SameLine();
         ImGui::Checkbox("S", &scale_snap_);
-        const char *tools[]{"Select [Q]", "Move [W]", "Rotate [E]", "Scale [R]"};
+        const char *tools[]{"Select", "Move", "Rotate", "Scale"};
         for (int i = 0; i < 4; ++i) {
             if (i)
                 ImGui::SameLine();
@@ -61,6 +61,8 @@ void Workspace::viewport(ImTextureID texture, rhi::Extent extent, Scene &scene, 
                 finish_edit();
                 tool_ = static_cast<TransformTool>(i);
             }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s (%c)", tools[i], "QWER"[i]);
             if (active)
                 ImGui::PopStyleColor();
         }

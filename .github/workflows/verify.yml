@@ -42,3 +42,5 @@ jobs:
         run: |
           xvfb-run -a ./build/linux-sanitize/SoulsRuntime --validation --smoke 120
           xvfb-run -a ./build/linux-sanitize/SoulsEditor --validation --smoke 120
+          xvfb-run -a ./build/linux-sanitize/SoulsRuntime --playground --validation --smoke 120
+          xvfb-run -a ./build/linux-sanitize/SoulsEditor --playground --validation --smoke 120

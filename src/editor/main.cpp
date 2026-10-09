@@ -17,6 +17,11 @@ int main(int argc, char **argv) {
     platform::Window window;
     if (auto created = window.create("Souls Editor | Rendering workspace"); !created)
         return platform::report(created.error());
+    auto logo = brand::Logo::load();
+    if (!logo)
+        return platform::report(logo.error());
+    if (auto icon = window.set_icon(*logo); !icon)
+        return platform::report(icon.error());
     auto device = rhi::Device::create({window.get(), args->validation, args->vsync});
     if (!device)
         return platform::report(device.error());
@@ -30,12 +35,20 @@ int main(int argc, char **argv) {
     auto document = editor::EditorDocument::create(*scene);
     if (!document)
         return platform::report(document.error());
-    editor::Workspace workspace{*document, *scene};
-    if (auto initialized = graphics.initialize(window.get()); !initialized)
+    auto demo_scene = Scene::create();
+    if (!demo_scene)
+        return platform::report(demo_scene.error());
+    auto demo = demo::Session::create(*demo_scene);
+    if (!demo)
+        return platform::report(demo.error());
+    editor::Workspace workspace{*document, *scene, *demo_scene, *demo};
+    if (auto initialized = graphics.initialize(window.get(), *logo); !initialized)
         return platform::report(initialized.error());
     if (auto ready = renderer.initialize(); !ready)
         return platform::report(ready.error());
+    workspace.set_logo(graphics.logo());
     workspace.initialize(window.get(), !args->smoke_frames);
+    workspace.show_demo(!args->playground);
     float scale = SDL_GetWindowDisplayScale(window.get());
     editor::Workspace::theme(scale);
     if (auto resized = renderer.resize_viewport(workspace.requested_extent()); !resized)
@@ -102,6 +115,17 @@ int main(int argc, char **argv) {
                 return platform::report(texture.error());
         }
         const auto events_end = Clock::now();
+        if (args->smoke_frames && !args->playground) {
+            demo::Input input{};
+            input.forward = frames < 110 ? 1.0F : 0.0F;
+            if (auto tick = demo->tick(input, 1.0F / 60); !tick)
+                return platform::report(tick.error());
+            // Exercise both workspaces and viewport texture retirement in one run.
+            if (frames == 20)
+                workspace.show_demo(false);
+            if (frames == 55)
+                workspace.show_demo(true);
+        }
         graphics.new_frame();
         workspace.draw(*texture, renderer.extent(), device->adapter_name(), *scene, window.get(),
                        SDL_GetWindowPixelDensity(window.get()));
@@ -115,14 +139,16 @@ int main(int argc, char **argv) {
             }
             return platform::report(command.error());
         }
-        auto batch = scene->extract(device->frame_arena());
+        auto &render_scene = workspace.render_scene();
+        auto batch = render_scene.extract(device->frame_arena());
         if (!batch) {
             const auto ignored = device->end_frame(*command);
             (void)ignored;
             return platform::report(batch.error());
         }
-        if (auto drawn = renderer.record(*command, *scene, *batch, workspace.camera(), workspace.selected(),
-                                         workspace.grid(), workspace.lit(), workspace.selection());
+        if (auto drawn =
+                renderer.record(*command, render_scene, *batch, workspace.camera(), workspace.selected(),
+                                workspace.grid(), workspace.lit(), workspace.selection());
             !drawn) {
             const auto ignored = device->end_frame(*command);
             (void)ignored;
@@ -161,6 +187,10 @@ int main(int argc, char **argv) {
     }
     if (args->smoke_frames && (frames != args->smoke_frames || resizes < 2))
         return platform::report({ErrorCode::platform, "Smoke test did not complete both resize transitions"});
+    if (args->smoke_frames && workspace.demo_active() &&
+        (scene->size() != 9 || demo->state().checkpoint != 1 || demo->state().collected != 1))
+        return platform::report(
+            {ErrorCode::invalid_argument, "Demo did not advance independently of the editor world"});
     if (auto closed = graphics.shutdown(); !closed)
         return platform::report(closed.error());
     if (auto closed = renderer.shutdown(); !closed)
