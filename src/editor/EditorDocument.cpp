@@ -922,6 +922,30 @@ Result<void> EditorDocument::new_scene(bool playground) noexcept {
     p.reset_history(false);
     return {};
 }
+Result<void> EditorDocument::replace_scene(Scene &&candidate) noexcept {
+    auto &p = *impl_;
+    if (p.playing || p.editing || &candidate == p.scene)
+        return fail("Finish editing before replacing the level");
+    if (candidate.size() > actor_limit || candidate.size() > std::numeric_limits<ActorId>::max() - p.next_id)
+        return fail("The template exceeds document capacity", ErrorCode::exhausted);
+    std::array<Mapping, capacity> mapping{};
+    std::size_t count = 0;
+    auto next_id = p.next_id;
+    for (auto h : candidate.actors()) {
+        auto actor = candidate.actor(h);
+        if (!actor || !valid_actor(*actor))
+            return fail("The template contains an invalid actor");
+        mapping[count++] = {next_id++, h};
+    }
+    *p.scene = std::move(candidate);
+    p.mapping = mapping;
+    p.count = count;
+    p.next_id = next_id;
+    p.file_path.fill(0);
+    clear_selection();
+    p.reset_history(false);
+    return {};
+}
 const char *EditorDocument::path() const noexcept {
     return impl_->file_path.data();
 }

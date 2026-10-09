@@ -212,6 +212,13 @@ int main() {
     REQUIRE(!document->save("missing-document-folder/level.souls"));
     REQUIRE(!document->dirty() && std::strcmp(document->path(), unicode_path) == 0);
     REQUIRE(document->load(level) && scene->size() == EditorDocument::actor_limit);
+    auto template_scene = Scene::create();
+    REQUIRE(template_scene && template_scene->spawn(ActorKind::cube, "Template actor"));
+    const auto old_id = document->actor_id(scene->actors()[0]);
+    REQUIRE(document->replace_scene(std::move(*template_scene)));
+    REQUIRE(scene->size() == 1 && document->dirty() && !document->path()[0] && !document->can_undo());
+    REQUIRE(!document->resolve(old_id) && document->selection().empty());
+    REQUIRE(!document->replace_scene(std::move(*scene)) && scene->size() == 1);
     std::remove(level);
     std::remove(autosave);
     std::remove(malformed);

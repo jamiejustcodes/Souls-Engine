@@ -61,3 +61,9 @@ add_library(SoulsImGuizmo STATIC "${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp")
 target_include_directories(SoulsImGuizmo SYSTEM PUBLIC "${imguizmo_SOURCE_DIR}/src")
 target_link_libraries(SoulsImGuizmo PUBLIC SoulsImGui)
 # Third-party sources keep their own warning/exception policy.
+
+FetchContent_Declare(stb GIT_REPOSITORY https://github.com/nothings/stb.git
+  GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20 SOURCE_SUBDIR souls-standalone)
+FetchContent_MakeAvailable(stb)
+add_library(SoulsPng STATIC "${CMAKE_CURRENT_SOURCE_DIR}/src/brand/Stb.cpp")
+target_include_directories(SoulsPng SYSTEM PUBLIC "${stb_SOURCE_DIR}")

@@ -51,6 +51,8 @@ class EditorDocument final {
     [[nodiscard]] Result<void> autosave(const char *path) noexcept;
     [[nodiscard]] Result<void> recover(const char *path) noexcept;
     [[nodiscard]] Result<void> new_scene(bool playground = true) noexcept;
+    // Install a validated template as an unsaved level without changing the Scene address.
+    [[nodiscard]] Result<void> replace_scene(Scene &&candidate) noexcept;
     [[nodiscard]] const char *path() const noexcept;
     [[nodiscard]] Result<void> begin_play() noexcept;
     [[nodiscard]] Result<void> stop_play() noexcept;
