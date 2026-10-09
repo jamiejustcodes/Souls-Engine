@@ -1,4 +1,5 @@
 #include "editor/Workspace.hpp"
+#include <ImGuizmo.h>
 #include <SDL3/SDL.h>
 #include <cctype>
 #include <cstdio>
@@ -104,6 +105,8 @@ void Workspace::finish_edit(bool cancel) noexcept {
         if (!done)
             log(done.error().message);
     }
+    if (gizmo_edit_)
+        ImGuizmo::Enable(false);
     gizmo_edit_ = details_edit_ = false;
     edit_count_ = 0;
     selected_ = document_.primary();

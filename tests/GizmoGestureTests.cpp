@@ -3,8 +3,8 @@
 #include <imgui.h>
 
 #include <ImGuizmo.h>
-#include <utility>
 #include <souls/core/Math.hpp>
+#include <utility>
 namespace {
 void check(bool value, const char *message) {
     if (!value) {
@@ -74,6 +74,12 @@ int main() {
         frame(operation, {hit.x + 32, hit.y + 20}, false);
         check(changed, "drag modifies the transform");
         check(!ImGuizmo::IsUsing(), "release finishes the gesture");
+        frame(operation, hit, false);
+        frame(operation, hit, true);
+        // A cancelled document gesture must also release the widget's internal drag.
+        ImGuizmo::Enable(false);
+        check(!ImGuizmo::IsUsing(), "disabling the widget cancels its active gesture");
+        frame(operation, hit, false);
         for (float value : matrix.m)
             check(std::isfinite(value), "gesture produces a finite matrix");
     }

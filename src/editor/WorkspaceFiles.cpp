@@ -17,6 +17,11 @@ void Workspace::initialize(SDL_Window *window, bool persistent) noexcept {
     } else
         log(SDL_GetError());
 }
+void Workspace::file_error(const char *message) noexcept {
+    log(message);
+    std::snprintf(file_error_message_.data(), file_error_message_.size(), "%s", message);
+    file_error_prompt_ = true;
+}
 void Workspace::request_exit() noexcept {
     request_action(Action::quit);
 }
@@ -44,7 +49,7 @@ void Workspace::perform_action(Action action) noexcept {
     else if (action == Action::new_level) {
         auto done = document_.new_scene();
         if (!done)
-            log(done.error().message);
+            file_error(done.error().message);
         else {
             selected_ = {};
             camera_ = Camera{};
@@ -53,7 +58,7 @@ void Workspace::perform_action(Action action) noexcept {
     } else if (action == Action::open_level) {
         auto done = files_.request(FileDialogKind::open, main_window_, document_.path());
         if (!done)
-            log(done.error().message);
+            file_error(done.error().message);
     }
 }
 void Workspace::save_level(bool save_as) noexcept {
@@ -64,16 +69,17 @@ void Workspace::save_level(bool save_as) noexcept {
         auto done = files_.request(FileDialogKind::save, main_window_,
                                    document_.path()[0] ? document_.path() : "Untitled.souls");
         if (!done) {
-            log(done.error().message);
+            file_error(done.error().message);
             after_save_ = Action::none;
         }
     } else {
         auto done = document_.save(document_.path());
         if (!done) {
-            log(done.error().message);
+            file_error(done.error().message);
             after_save_ = Action::none;
         } else {
             log("Level saved");
+            defer_recovery_ = false;
             if (recovery_path_[0])
                 SDL_RemovePath(recovery_path_.data());
             const auto action = after_save_;
@@ -86,14 +92,14 @@ void Workspace::file_actions() noexcept {
     FileDialogResult result{};
     if (files_.poll(result)) {
         if (result.error[0]) {
-            log(result.error.data());
+            file_error(result.error.data());
             after_save_ = Action::none;
         } else if (result.cancelled)
             after_save_ = Action::none;
         else if (result.kind == FileDialogKind::open) {
             auto done = document_.load(result.path.data());
             if (!done)
-                log(done.error().message);
+                file_error(done.error().message);
             else {
                 selected_ = document_.primary();
                 camera_ = Camera{};
@@ -110,10 +116,11 @@ void Workspace::file_actions() noexcept {
                 std::memcpy(result.path.data() + length, expected, 7);
             auto done = document_.save(result.path.data());
             if (!done) {
-                log(done.error().message);
+                file_error(done.error().message);
                 after_save_ = Action::none;
             } else {
                 log("Level saved");
+                defer_recovery_ = false;
                 if (recovery_path_[0])
                     SDL_RemovePath(recovery_path_.data());
                 const auto action = after_save_;
@@ -121,6 +128,22 @@ void Workspace::file_actions() noexcept {
                 perform_action(action);
             }
         }
+    }
+    if (file_error_prompt_)
+        ImGui::OpenPopup("Level operation failed");
+    if (ImGui::BeginPopupModal("Level operation failed", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("%s", file_error_message_.data());
+        if (ImGui::Button("Close")) {
+            file_error_prompt_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Show Output Log")) {
+            show_tools_ = focus_log_ = true;
+            file_error_prompt_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
     if (unsaved_prompt_)
         ImGui::OpenPopup("Unsaved level");
@@ -158,7 +181,7 @@ void Workspace::file_actions() noexcept {
         if (ImGui::Button("Restore")) {
             auto done = document_.recover(recovery_path_.data());
             if (!done)
-                log(done.error().message);
+                file_error(done.error().message);
             else
                 log("Recovery level restored");
             recovery_available_ = false;
@@ -171,7 +194,8 @@ void Workspace::file_actions() noexcept {
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Later")) {
+        if (ImGui::Button("Keep for next launch")) {
+            defer_recovery_ = true;
             recovery_available_ = false;
             ImGui::CloseCurrentPopup();
         }
@@ -185,7 +209,7 @@ void Workspace::file_actions() noexcept {
             finish_edit();
             auto done = document_.group_selection(group_name_.data());
             if (!done)
-                log(done.error().message);
+                file_error(done.error().message);
             group_prompt_ = false;
             ImGui::CloseCurrentPopup();
         }
@@ -197,11 +221,12 @@ void Workspace::file_actions() noexcept {
         ImGui::EndPopup();
     }
     autosave_elapsed_ += ImGui::GetIO().DeltaTime;
-    if (persistent_ && recovery_path_[0] && !recovery_available_ && autosave_elapsed_ >= 60 &&
-        document_.dirty() && !document_.editing() && !playing_ && !files_.pending() && !unsaved_prompt_) {
+    if (persistent_ && recovery_path_[0] && !defer_recovery_ && !recovery_available_ &&
+        autosave_elapsed_ >= 60 && document_.dirty() && !document_.editing() && !playing_ &&
+        !files_.pending() && !unsaved_prompt_) {
         auto done = document_.autosave(recovery_path_.data());
         if (!done)
-            log(done.error().message);
+            file_error(done.error().message);
         else
             log("Recovery level updated");
         autosave_elapsed_ = 0;

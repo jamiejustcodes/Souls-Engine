@@ -56,6 +56,7 @@ class Workspace final {
     void viewport(ImTextureID texture, rhi::Extent extent, Scene &scene, SDL_Window *window,
                   float density) noexcept;
     void file_actions() noexcept;
+    void file_error(const char *message) noexcept;
     void request_action(Action action) noexcept;
     void perform_action(Action action) noexcept;
     void save_level(bool save_as = false) noexcept;
@@ -100,6 +101,8 @@ class Workspace final {
     float translate_step_ = 10, rotate_step_ = 15, scale_step_ = 0.25F;
     std::array<char, 1024> recovery_path_{};
     std::array<char, 64> group_name_{"Group"};
+    std::array<char, 160> file_error_message_{};
+    bool file_error_prompt_ = false, defer_recovery_ = false;
     bool persistent_ = false, recovery_available_ = false, unsaved_prompt_ = false, group_prompt_ = false;
     Action pending_action_ = Action::none, after_save_ = Action::none;
     double autosave_elapsed_ = 0;
