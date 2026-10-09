@@ -93,7 +93,13 @@ Result<PipelineHandle> Device::create_pipeline(PipelineDesc desc) noexcept {
         desc.pixel_shader.size() % 4)
         return std::unexpected(Error{ErrorCode::invalid_argument, "Invalid shader pipeline"});
     if (!p.pipeline_layout) {
-        VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+        const auto alignment = std::max<VkDeviceSize>(1, p.properties.limits.minUniformBufferOffsetAlignment);
+        const auto stride = (sizeof(FrameConstants) + alignment - 1) / alignment * alignment;
+        if (stride > UINT32_MAX / geometry_scopes_per_frame)
+            return std::unexpected(
+                Error{ErrorCode::unsupported, "Uniform buffer alignment exceeds bounded storage"});
+        p.constant_stride = static_cast<std::uint32_t>(stride);
+        VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1,
                                              VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                              nullptr};
         VkDescriptorSetLayoutCreateInfo layout_info{};
@@ -111,7 +117,7 @@ Result<PipelineHandle> Device::create_pipeline(PipelineDesc desc) noexcept {
         root.pPushConstantRanges = &push;
         if (status == VK_SUCCESS)
             status = vkCreatePipelineLayout(p.device, &root, nullptr, &p.pipeline_layout);
-        VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, frames_in_flight};
+        VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, frames_in_flight};
         VkDescriptorPoolCreateInfo pool{};
         pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         pool.maxSets = frames_in_flight;
@@ -129,7 +135,8 @@ Result<PipelineHandle> Device::create_pipeline(PipelineDesc desc) noexcept {
             p.constants[i] = *h;
             auto &b = *p.buffers.get(*h);
             auto ready =
-                p.allocate_buffer(b, sizeof(FrameConstants), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                p.allocate_buffer(b, static_cast<VkDeviceSize>(p.constant_stride) * geometry_scopes_per_frame,
+                                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
             if (!ready)
                 return std::unexpected(ready.error());
@@ -147,7 +154,7 @@ Result<PipelineHandle> Device::create_pipeline(PipelineDesc desc) noexcept {
             write.dstSet = p.constant_sets[i];
             write.dstBinding = 0;
             write.descriptorCount = 1;
-            write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
             write.pBufferInfo = &info;
             vkUpdateDescriptorSets(p.device, 1, &write, 0, nullptr);
         }
@@ -273,14 +280,21 @@ Result<void> Device::begin_geometry(CommandList list, TextureHandle target,
         return std::unexpected(Error{ErrorCode::invalid_handle, "Invalid geometry target"});
     if (p.geometry_target || !p.pipeline_layout)
         return std::unexpected(Error{ErrorCode::invalid_argument, "Geometry scope unavailable"});
+    auto &f = p.frames[p.slot];
+    if (!p.open || list.serial != p.serial || list.native != f.command)
+        return std::unexpected(Error{ErrorCode::invalid_argument, "Expired geometry command token"});
+    if (f.constant_count == geometry_scopes_per_frame)
+        return std::unexpected(Error{ErrorCode::exhausted, "Per-frame geometry constants exhausted"});
     if (auto ready = barrier(list, {target, t->state == Access::shader_read ? Stage::fragment : Stage::none,
                                     Stage::color_output, t->state, Access::render_target});
         !ready)
         return ready;
     // Depth storage is allocated on the cold target-creation path.
-    auto command = p.frames[p.slot].command;
+    // The descriptor is persistent; only its dynamic offset changes for each recorded view.
+    auto command = f.command;
     auto *b = p.buffers.get(p.constants[p.slot]);
-    std::memcpy(b->mapped, &frame, sizeof(frame));
+    const auto constant_offset = f.constant_count++ * p.constant_stride;
+    std::memcpy(static_cast<std::byte *>(b->mapped) + constant_offset, &frame, sizeof(frame));
     VkImageMemoryBarrier2 depth{};
     depth.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
     depth.srcStageMask =
@@ -331,7 +345,7 @@ Result<void> Device::begin_geometry(CommandList list, TextureHandle target,
     vkCmdSetViewport(command, 0, 1, &viewport);
     vkCmdSetScissor(command, 0, 1, &scissor);
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, p.pipeline_layout, 0, 1,
-                            &p.constant_sets[p.slot], 0, nullptr);
+                            &p.constant_sets[p.slot], 1, &constant_offset);
     p.geometry_target = target;
     return {};
 }

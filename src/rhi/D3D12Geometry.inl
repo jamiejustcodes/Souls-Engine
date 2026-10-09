@@ -113,7 +113,7 @@ Result<PipelineHandle> Device::create_pipeline(PipelineDesc desc) noexcept {
             heap.Type = D3D12_HEAP_TYPE_UPLOAD;
             D3D12_RESOURCE_DESC d{};
             d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-            d.Width = 256;
+            d.Width = constant_stride * geometry_scopes_per_frame;
             d.Height = 1;
             d.DepthOrArraySize = 1;
             d.MipLevels = 1;
@@ -179,12 +179,18 @@ Result<void> Device::begin_geometry(CommandList list, TextureHandle target,
         return std::unexpected(Error{ErrorCode::invalid_handle, "Invalid geometry target"});
     if (p.geometry_target || !p.root)
         return std::unexpected(Error{ErrorCode::invalid_argument, "Geometry scope unavailable"});
+    auto &f = p.frames[p.slot];
+    if (!p.open || list.serial != p.serial || list.native != f.command.Get())
+        return std::unexpected(Error{ErrorCode::invalid_argument, "Expired geometry command token"});
+    if (f.constant_count == geometry_scopes_per_frame)
+        return std::unexpected(Error{ErrorCode::exhausted, "Per-frame geometry constants exhausted"});
     if (auto ready = barrier(list, {target, t->state == Access::shader_read ? Stage::fragment : Stage::none,
                                     Stage::color_output, t->state, Access::render_target});
         !ready)
         return ready;
-    auto &f = p.frames[p.slot];
-    std::memcpy(f.mapped, &frame, sizeof(frame));
+    // Earlier draws may execute after CPU recording completes. Give each view its own slice.
+    const auto constant_offset = f.constant_count++ * constant_stride;
+    std::memcpy(static_cast<std::byte *>(f.mapped) + constant_offset, &frame, sizeof(frame));
     auto depth = t->dsv->GetCPUDescriptorHandleForHeapStart();
     // Order previous depth writes even when the layout remains DEPTH_STENCIL_WRITE.
     D3D12_TEXTURE_BARRIER b{};
@@ -214,7 +220,7 @@ Result<void> Device::begin_geometry(CommandList list, TextureHandle target,
     f.command->RSSetViewports(1, &vp);
     f.command->RSSetScissorRects(1, &sc);
     f.command->SetGraphicsRootSignature(p.root.Get());
-    f.command->SetGraphicsRootConstantBufferView(0, f.constants->GetGPUVirtualAddress());
+    f.command->SetGraphicsRootConstantBufferView(0, f.constants->GetGPUVirtualAddress() + constant_offset);
     f.command->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     p.geometry_target = target;
     return {};

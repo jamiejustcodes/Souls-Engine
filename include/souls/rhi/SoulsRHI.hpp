@@ -28,6 +28,8 @@ decltype(auto) dispatch(D3D12Fn &&dx, VulkanFn &&vk) noexcept {
         return std::forward<VulkanFn>(vk)();
 }
 inline constexpr std::uint32_t frames_in_flight = 2;
+// Each geometry scope retains independent camera/light constants until frame retirement.
+inline constexpr std::uint32_t geometry_scopes_per_frame = 8;
 struct Extent {
     std::uint32_t width = 0, height = 0;
     friend bool operator==(Extent, Extent) = default;

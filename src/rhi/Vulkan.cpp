@@ -127,6 +127,7 @@ struct Device::Impl {
         VkCommandBuffer command = VK_NULL_HANDLE;
         VkSemaphore acquired = VK_NULL_HANDLE;
         std::uint64_t value = 0;
+        std::uint32_t constant_count = 0;
         std::array<std::byte, 512 * 1024> storage{};
         LinearArena arena{storage};
     };
@@ -179,6 +180,7 @@ struct Device::Impl {
     std::array<BufferHandle, 128> owned_buffers{};
     std::array<PipelineHandle, 16> owned_pipelines{};
     std::array<BufferHandle, frames_in_flight> constants{};
+    std::uint32_t constant_stride = 0;
     std::array<VkDescriptorSet, frames_in_flight> constant_sets{};
     VkDescriptorSetLayout constant_layout = VK_NULL_HANDLE;
     VkDescriptorPool constant_pool = VK_NULL_HANDLE;
@@ -358,8 +360,8 @@ struct Device::Impl {
         info.imageColorSpace = colorspace;
         info.imageExtent = {extent.width, extent.height};
         info.imageArrayLayers = 1;
-        info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                          (blit_supported ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0);
+        info.imageUsage =
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | (blit_supported ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0);
         info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         info.preTransform = caps.currentTransform;
         info.compositeAlpha = alpha;
@@ -712,6 +714,7 @@ Result<CommandList> Device::begin_frame(Color clear) noexcept {
     if (status != VK_SUCCESS)
         return std::unexpected(failure("Command begin failed", status));
     f.arena.reset();
+    f.constant_count = 0;
     p.open = true;
     ++p.serial;
     if (p.queries) {

@@ -11,6 +11,9 @@ namespace souls::rhi {
 using Microsoft::WRL::ComPtr;
 namespace {
 constexpr std::uint32_t texture_capacity = 32, srv_capacity = 1024;
+constexpr std::uint32_t constant_stride =
+    (sizeof(FrameConstants) + D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1) /
+    D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT * D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
 Error gpu_error(const char *message, HRESULT result) noexcept {
     return {ErrorCode::gpu, message, result};
 }
@@ -83,6 +86,7 @@ struct Device::Impl {
         ComPtr<ID3D12GraphicsCommandList7> command;
         ComPtr<ID3D12Resource> constants;
         void *mapped = nullptr;
+        std::uint32_t constant_count = 0;
         std::uint64_t fence = 0;
         std::array<std::byte, 512 * 1024> storage{};
         LinearArena arena{storage};
@@ -423,6 +427,7 @@ Result<CommandList> Device::begin_frame(Color clear) noexcept {
     if (FAILED(hr))
         return std::unexpected(gpu_error("Command reset failed", hr));
     f.arena.reset();
+    f.constant_count = 0;
     ++p.serial;
     p.open = true;
     f.command->EndQuery(p.queries.Get(), D3D12_QUERY_TYPE_TIMESTAMP, p.slot * 2);
