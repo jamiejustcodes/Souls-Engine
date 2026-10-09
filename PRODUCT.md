@@ -6,8 +6,9 @@ Native desktop: Windows and Linux, SDL3 and Dear ImGui.
 ## Users and purpose
 Game engine developers inspecting real-time rendering, scene data and frame budgets.
 A UE5-style editing workspace pairs with approachable studio building tools.
-Startup opens Souls Courtyard, a playable third-person course; the editor remains
-one click away and can open the course geometry for editing.
+Startup opens the editor. Souls Courtyard is a playable third-person course in
+a movable, dockable demo panel available from the toolbar and Window menu. The
+panel runs independently and can open its authored geometry for editing.
 
 ## Constraints
 D3D12 with Agility on Windows; Vulkan 1.3 on Linux. Static backend selection,

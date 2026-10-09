@@ -2,7 +2,7 @@
 
 Status: accepted, 9 October 2026.
 
-A playable startup course needs movement, collision, progression and camera
+A playable example course needs movement, collision, progression and camera
 rules in both the editor and standalone runtime. Putting those rules into the
 workspace would duplicate them in the runtime and make headless validation
 unreliable. Playing inside EditorDocument would also mix temporary game state
@@ -16,9 +16,10 @@ and its actors must outlive the session. Construction is cold and transactional.
 Tick/reset update existing actors without structural changes or allocation.
 
 SDL runtime and ImGui workspace are two real input/presentation adapters. The
-editor holds a separate demo world, choosing that scene and camera for rendering
-while the demo is active. Esc/focus loss releases relative mouse mode and pauses
-progress. Switching workspaces preserves document selection, edits and history.
+editor holds a separate demo world and renders it into the optional dockable
+panel, alongside the editing viewport. Esc/focus loss releases relative mouse
+mode and pauses progress. Opening/closing the panel preserves document selection,
+edits and history. ADR-0003 records independent per-view constants.
 
 Edit demo constructs a fresh authored candidate and unlocks its actors. The
 existing Save/Discard/Cancel flow protects a dirty document. replace_scene
@@ -29,7 +30,7 @@ The installed geometry is an editor template; it does not serialize demo rules.
 The interface is the test surface: headless tests complete the course with normal
 input, compare render cadence, respawn at checkpoints, restart and reject invalid
 input. C++ and Flecs allocator hooks guard the measured gameplay interval. GPU
-smoke adapters advance the same session and the editor switches both workspaces.
+smoke adapters advance the same session and the editor opens/closes the panel.
 
 The controller is kinematic and restricted to authored AABB solids. A general
 physics module, imported collision and scripting are separate future decisions.

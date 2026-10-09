@@ -6,7 +6,7 @@
 
 Souls Engine is a C++23 game engine for Windows and Linux, built around explicit
 graphics APIs and a dockable desktop editor. The current development milestone
-is Souls Courtyard: a playable platforming course available at startup, alongside
+pairs the editing workspace with Souls Courtyard, a dockable playable course, and
 six built-in parts, viewport gizmos, transactional undo/redo, level files and live
 scene editing through Flecs.
 
@@ -64,22 +64,30 @@ combined graphics/presentation queue. Unsupported devices return explicit errors
 
 ## Play Souls Courtyard
 
-The editor opens on the playable demo. Choose **Start playing** to capture the
-mouse: **WASD** moves relative to the camera, **Space** jumps, **Shift** sprints and
-the mouse orbits. **Esc** pauses and releases the cursor. Collect four gold orbs,
-cross the raised platforms and reach the final arch. Falling returns you to the
-last checkpoint; collected orbs remain collected. Restart resets the whole run.
+The editor opens directly into the normal editing workspace. Choose **Demo** in
+the toolbar or **Window > Playable Demo** to open Souls Courtyard in a movable,
+resizable panel. Drag its title/tab to dock it beside another panel, tab it with
+the viewport, or pull it outside the main window to detach it. Close the panel
+with its X and reopen it from the toolbar whenever you want.
 
-**Open editor** returns to your editing workspace. Its **Play demo** button brings
-the course back without touching your edits, selection or undo history. **Edit
-demo** opens a fresh copy of the course geometry as an unsaved level, using the
-normal Save/Discard/Cancel flow. Choose Save As to keep your version. About shows
-the complete original logo; the crest appears in the toolbar and window icon.
+Press **Play** in the demo panel to capture its mouse. **WASD** moves relative to
+the camera, **Space** jumps, **Shift** sprints and the mouse orbits. **Esc** pauses
+and releases the cursor. Collect four gold orbs, cross the raised platforms and
+reach the final arch. Falling returns you to the last checkpoint; collected orbs
+remain collected. Restart resets the whole run.
+
+The editing viewport remains independent, including its camera, actors, selection
+and undo history. The panel has its own render target and captures input from its
+own SDL window when detached. Collapsing, hiding, closing or changing focus pauses
+gameplay and releases the mouse. **Edit demo** opens a fresh copy of the course
+geometry as an unsaved level, using normal Save/Discard/Cancel protection.
+About shows the complete original logo; the crest appears in the toolbar/icon.
 
 `SoulsRuntime` starts the same course without editor chrome. Click to capture the
 mouse, use the same movement keys, and press R to restart. Progress and paused
 controls appear in its window title. Launch either executable with `--playground`
-to open the original primitive playground instead.
+to open the original primitive playground in the runtime; editor smoke runs
+with that flag leave the demo panel closed.
 
 The controller runs at 120 Hz with camera obstruction checks, swept AABB collision
 against authored platforms/walls, buffered jumping and coyote time. It is a bounded
@@ -93,7 +101,7 @@ for edited levels remain future work.
   Drag a part from Build or Content Browser onto the viewport. The wire preview
   snaps along the procedural floor and rests on its surface, including rotated
   or elevated floors. Double-click a mesh tile for placement at the world origin.
-- RMB + WASD flies; Q/E rises/descends, Shift boosts, and wheel scales speed 1–8.
+- RMB + WASD flies; Q/E rises/descends, Shift boosts, and wheel scales speed 1â€“8.
   F focuses the selection. Outside flight, Q/W/E/R selects Select/Move/Rotate/Scale
   while the viewport is hovered and text input is inactive.
 - Click geometry or an Outliner row to select. Ctrl-click toggles; Shift-click
@@ -130,7 +138,7 @@ for edited levels remain future work.
   GPU time and draw counts come from the renderer. The console accepts `help`,
   `clear`, `reset`, `cube`, `sphere`.
 
-The minimum window size is 1100×720 at 100% DPI and scales with DPI. Offscreen
+The minimum window size is 1100Ã—720 at 100% DPI and scales with DPI. Offscreen
 viewports resize after retirement; minimized windows suspend rendering. Detached
 panel close stays local. Landscape and Modeling mode labels reserve workspace
 roles; sculpting and topology tools remain future work.
@@ -190,7 +198,9 @@ ASAN_OPTIONS=detect_leaks=0 xvfb-run -a ./build/linux-sanitize/SoulsRuntime --va
 
 `--smoke N` (N>=90) drives narrow/wide resize transitions and exits nonzero on
 failures. Default smoke runs move the player through the first checkpoint; the
-editor switches workspaces and checks that its edit world remains intact.
+editor opens/closes the demo panel and checks that its edit world remains intact.
+Its smoke also saturates all eight per-frame geometry constant slices and rejects
+a ninth scope before resetting them after frame retirement.
 `--playground --smoke N` retains the original grid/primitive smoke. The editor
 additionally tests simulation restore, selected actor edits,
 duplicate/delete and stale texture/buffer/pipeline handles and command tokens.

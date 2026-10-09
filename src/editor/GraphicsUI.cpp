@@ -1,5 +1,6 @@
 #include "editor/GraphicsUI.hpp"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -162,30 +163,40 @@ void GraphicsUI::render(rhi::CommandList list) noexcept {
     rhi::detail::NativeAccess::end_overlay(device_, list);
 }
 Result<ImTextureID> GraphicsUI::attach(rhi::TextureHandle texture) noexcept {
-    if (texture_)
-        return std::unexpected(Error{ErrorCode::invalid_argument, "Detach previous UI texture first"});
+    auto slot = std::find(textures_.begin(), textures_.end(), ImTextureID{0});
+    if (slot == textures_.end())
+        return std::unexpected(Error{ErrorCode::exhausted, "UI scene texture slots exhausted"});
     auto view = rhi::detail::NativeAccess::texture(device_, texture);
     if (!view)
         return std::unexpected(view.error());
 #if defined(SOULS_RHI_D3D12)
-    texture_ = view->gpu.ptr;
+    *slot = view->gpu.ptr;
 #else
-    texture_ = reinterpret_cast<ImTextureID>(
+    *slot = reinterpret_cast<ImTextureID>(
         ImGui_ImplVulkan_AddTexture(sampler_, view->view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    if (!texture_)
+    if (!*slot)
         return std::unexpected(Error{ErrorCode::exhausted, "UI texture descriptor allocation failed"});
 #endif
-    return texture_;
+    return *slot;
 }
-Result<void> GraphicsUI::detach() noexcept {
-    if (!texture_)
+Result<void> GraphicsUI::detach(ImTextureID texture) noexcept {
+    if (!texture)
         return {};
+    auto slot = std::find(textures_.begin(), textures_.end(), texture);
+    if (slot == textures_.end())
+        return std::unexpected(Error{ErrorCode::invalid_handle, "Unknown UI scene texture"});
     if (auto idle = device_.wait_idle(); !idle)
         return idle;
 #if defined(SOULS_RHI_VULKAN)
-    ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(texture_));
+    ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(*slot));
 #endif
-    texture_ = 0;
+    *slot = 0;
+    return {};
+}
+Result<void> GraphicsUI::detach() noexcept {
+    for (auto texture : textures_)
+        if (auto result = detach(texture); !result)
+            return result;
     return {};
 }
 Result<void> GraphicsUI::shutdown() noexcept {

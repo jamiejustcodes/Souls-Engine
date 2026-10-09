@@ -28,10 +28,8 @@ void Workspace::request_exit() noexcept {
 void Workspace::request_action(Action action) noexcept {
     if (files_.pending() || unsaved_prompt_)
         return;
-    if (demo_capture_) {
-        SDL_SetWindowRelativeMouseMode(main_window_, false);
-        demo_capture_ = false;
-    }
+    if (demo_capture_)
+        release_demo_input();
     finish_edit();
     if (playing_)
         stop(scene_);
@@ -279,7 +277,7 @@ void Workspace::file_actions() noexcept {
                 label = at + 1;
         char title[1200]{};
         std::snprintf(title, sizeof(title), "%s%s | Souls Editor", label, document_.dirty() ? " *" : "");
-        SDL_SetWindowTitle(main_window_, demo_active_ ? "Souls Courtyard | Souls Engine" : title);
+        SDL_SetWindowTitle(main_window_, title);
     }
 }
 } // namespace souls::editor

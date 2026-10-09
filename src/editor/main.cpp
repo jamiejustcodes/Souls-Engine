@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
     if (auto ready = scene->playground(); !ready)
         return platform::report(ready.error());
     Renderer renderer{*device};
+    Renderer demo_renderer{*device};
     editor::GraphicsUI graphics{*device};
     auto document = editor::EditorDocument::create(*scene);
     if (!document)
@@ -41,14 +42,16 @@ int main(int argc, char **argv) {
     auto demo = demo::Session::create(*demo_scene);
     if (!demo)
         return platform::report(demo.error());
-    editor::Workspace workspace{*document, *scene, *demo_scene, *demo};
+    editor::Workspace workspace{*document, *scene, *demo};
     if (auto initialized = graphics.initialize(window.get(), *logo); !initialized)
         return platform::report(initialized.error());
     if (auto ready = renderer.initialize(); !ready)
         return platform::report(ready.error());
+    if (auto ready = demo_renderer.initialize(); !ready)
+        return platform::report(ready.error());
     workspace.set_logo(graphics.logo());
     workspace.initialize(window.get(), !args->smoke_frames);
-    workspace.show_demo(!args->playground);
+    workspace.show_demo(false);
     float scale = SDL_GetWindowDisplayScale(window.get());
     editor::Workspace::theme(scale);
     if (auto resized = renderer.resize_viewport(workspace.requested_extent()); !resized)
@@ -56,6 +59,12 @@ int main(int argc, char **argv) {
     auto texture = graphics.attach(renderer.viewport());
     if (!texture)
         return platform::report(texture.error());
+    if (auto resized = demo_renderer.resize_viewport(workspace.demo_extent()); !resized)
+        return platform::report(resized.error());
+    auto demo_texture = graphics.attach(demo_renderer.viewport());
+    if (!demo_texture)
+        return platform::report(demo_texture.error());
+    workspace.set_demo_texture(*demo_texture);
     if (args->smoke_frames) {
         if (auto verified = renderer.verify_resources(); !verified)
             return platform::report(verified.error());
@@ -106,7 +115,7 @@ int main(int argc, char **argv) {
                 return platform::report({ErrorCode::platform, SDL_GetError()});
         }
         if (renderer.extent() != workspace.requested_extent()) {
-            if (auto detached = graphics.detach(); !detached)
+            if (auto detached = graphics.detach(*texture); !detached)
                 return platform::report(detached.error());
             if (auto resized = renderer.resize_viewport(workspace.requested_extent()); !resized)
                 return platform::report(resized.error());
@@ -114,16 +123,28 @@ int main(int argc, char **argv) {
             if (!texture)
                 return platform::report(texture.error());
         }
+        if (workspace.demo_active() && demo_renderer.extent() != workspace.demo_extent()) {
+            if (auto detached = graphics.detach(*demo_texture); !detached)
+                return platform::report(detached.error());
+            if (auto resized = demo_renderer.resize_viewport(workspace.demo_extent()); !resized)
+                return platform::report(resized.error());
+            demo_texture = graphics.attach(demo_renderer.viewport());
+            if (!demo_texture)
+                return platform::report(demo_texture.error());
+            workspace.set_demo_texture(*demo_texture);
+        }
         const auto events_end = Clock::now();
         if (args->smoke_frames && !args->playground) {
             demo::Input input{};
             input.forward = frames < 110 ? 1.0F : 0.0F;
             if (auto tick = demo->tick(input, 1.0F / 60); !tick)
                 return platform::report(tick.error());
-            // Exercise both workspaces and viewport texture retirement in one run.
+            // Open/close the dockable panel without replacing the editing viewport.
             if (frames == 20)
-                workspace.show_demo(false);
+                workspace.show_demo(true);
             if (frames == 55)
+                workspace.show_demo(false);
+            if (frames == 70)
                 workspace.show_demo(true);
         }
         graphics.new_frame();
@@ -139,25 +160,45 @@ int main(int argc, char **argv) {
             }
             return platform::report(command.error());
         }
-        auto &render_scene = workspace.render_scene();
-        auto batch = render_scene.extract(device->frame_arena());
+        auto batch = scene->extract(device->frame_arena());
         if (!batch) {
             const auto ignored = device->end_frame(*command);
             (void)ignored;
             return platform::report(batch.error());
         }
-        if (auto drawn =
-                renderer.record(*command, render_scene, *batch, workspace.camera(), workspace.selected(),
-                                workspace.grid(), workspace.lit(), workspace.selection());
+        if (auto drawn = renderer.record(*command, *scene, *batch, workspace.camera(), workspace.selected(),
+                                         workspace.grid(), workspace.lit(), workspace.selection());
             !drawn) {
             const auto ignored = device->end_frame(*command);
             (void)ignored;
             return platform::report(drawn.error());
         }
+        if (workspace.demo_renderable()) {
+            auto demo_batch = demo_scene->extract(device->frame_arena());
+            if (!demo_batch)
+                return platform::report(demo_batch.error());
+            if (auto drawn =
+                    demo_renderer.record(*command, *demo_scene, *demo_batch, demo->camera(), {}, false);
+                !drawn)
+                return platform::report(drawn.error());
+        }
+        if (args->smoke_frames && frames == 0) {
+            // Saturate the persistent view slices and prove failure leaves no open scope.
+            rhi::FrameConstants constants{};
+            for (std::uint32_t view = 1; view < rhi::geometry_scopes_per_frame; ++view) {
+                if (auto opened = device->begin_geometry(*command, renderer.viewport(), constants); !opened)
+                    return platform::report(opened.error());
+                if (auto closed = device->end_geometry(*command, renderer.viewport()); !closed)
+                    return platform::report(closed.error());
+            }
+            auto overflow = device->begin_geometry(*command, renderer.viewport(), constants);
+            if (overflow || overflow.error().code != ErrorCode::exhausted)
+                return platform::report({ErrorCode::gpu, "Geometry scope capacity was not enforced"});
+        }
         graphics.render(*command);
         editor::Sample sample{};
         sample.frame_ms = frame_ms;
-        sample.scene_draws = renderer.draws();
+        sample.scene_draws = renderer.draws() + (workspace.demo_renderable() ? demo_renderer.draws() : 0);
         sample.arena_bytes = device->frame_arena().used();
         auto *data = ImGui::GetDrawData();
         for (int i = 0; i < data->CmdListsCount; ++i)
@@ -194,6 +235,8 @@ int main(int argc, char **argv) {
     if (auto closed = graphics.shutdown(); !closed)
         return platform::report(closed.error());
     if (auto closed = renderer.shutdown(); !closed)
+        return platform::report(closed.error());
+    if (auto closed = demo_renderer.shutdown(); !closed)
         return platform::report(closed.error());
     std::printf("Editor passed: %u frames, %u resizes, adapter %s\n", frames, resizes,
                 device->adapter_name());

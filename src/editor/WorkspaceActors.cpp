@@ -81,7 +81,8 @@ bool vector_input(const char *label, Vec3 &v, float reset, float step, bool snap
 }
 } // namespace
 void Workspace::event(const SDL_Event &e) noexcept {
-    if (e.type == SDL_EVENT_MOUSE_MOTION && (flying_ || demo_capture_)) {
+    if (e.type == SDL_EVENT_MOUSE_MOTION && ((flying_ && e.motion.windowID == flight_window_) ||
+                                             (demo_capture_ && e.motion.windowID == demo_window_))) {
         mouse_x_ += e.motion.xrel;
         mouse_y_ += e.motion.yrel;
     }
@@ -89,9 +90,13 @@ void Workspace::event(const SDL_Event &e) noexcept {
         if (gizmo_edit_)
             finish_edit(true);
         marquee_ = false;
-        flying_ = demo_capture_ = false;
-        if (auto *w = SDL_GetWindowFromID(e.window.windowID))
-            SDL_SetWindowRelativeMouseMode(w, false);
+        if (demo_capture_ && e.window.windowID == demo_window_)
+            release_demo_input();
+        if (flying_ && e.window.windowID == flight_window_) {
+            flying_ = false;
+            if (auto *w = SDL_GetWindowFromID(flight_window_))
+                SDL_SetWindowRelativeMouseMode(w, false);
+        }
     }
 }
 void Workspace::log(const char *text) noexcept {

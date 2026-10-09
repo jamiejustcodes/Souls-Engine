@@ -33,12 +33,14 @@ indexed geometry, viewport sampling and presentation. This stage implements
 Blinn-Phong lighting and procedural sky color, with no claims of deferred
 GBuffer, shadow maps, full landscape sculpting or mesh topology authoring.
 
-Startup uses a dedicated playable canvas. The crest and course name anchor a
-60px toolbar; Open editor, Edit demo, Restart and About remain visible above the
-game. An objective HUD shows real collectible/checkpoint state. A compact
-start/pause card explicitly captures the mouse; Esc releases it. The control
-strip explains movement. The editor retains its layout and has a persistent
-green Play demo action, separate from primitive rotation Simulate.
+Startup opens the full editing workspace, with the demo panel closed. The green
+Demo toolbar action and Window > Playable Demo open a regular ImGui window with
+its native title/tab, close control, resizing and docking. Drag it into the layout
+or detach it outside the main window. Its compact toolbar groups Play/Pause,
+Restart and Edit demo; the objective HUD displays actual progression. Esc, focus
+loss or hiding the panel releases the mouse and pauses the session. The editing
+viewport and document stay available with their own camera and scene target.
+Input capture belongs to the demo's actual SDL window, including detached panels.
 
 The complete original logo is embedded and shown in About. A presentation-only
 crest crop works at menu size; the native window icon uses the same region. The

@@ -1,5 +1,6 @@
 #pragma once
 #include "rhi/NativeAccess.hpp"
+#include <array>
 #include <imgui.h>
 #include <souls/brand/Brand.hpp>
 namespace souls::editor {
@@ -15,12 +16,13 @@ class GraphicsUI final {
     void render(rhi::CommandList list) noexcept;
     [[nodiscard]] Result<ImTextureID> attach(rhi::TextureHandle texture) noexcept;
     [[nodiscard]] Result<void> detach() noexcept;
+    [[nodiscard]] Result<void> detach(ImTextureID texture) noexcept;
     [[nodiscard]] Result<void> shutdown() noexcept;
 
   private:
     rhi::Device &device_;
     bool context_ = false, platform_ = false, renderer_ = false;
-    ImTextureID texture_ = 0;
+    std::array<ImTextureID, 2> textures_{};
     ImTextureData logo_{};
 #if defined(SOULS_RHI_VULKAN)
     VkSampler sampler_ = VK_NULL_HANDLE;

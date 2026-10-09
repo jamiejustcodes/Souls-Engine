@@ -18,15 +18,21 @@ struct Sample {
 };
 class Workspace final {
   public:
-    Workspace(EditorDocument &document, Scene &scene, Scene &demo_scene, demo::Session &demo) noexcept
-        : document_(document), scene_(scene), demo_scene_(demo_scene), demo_(demo) {}
+    Workspace(EditorDocument &document, Scene &scene, demo::Session &demo) noexcept
+        : document_(document), scene_(scene), demo_(demo) {}
     void initialize(SDL_Window *window, bool persistent) noexcept;
     void set_logo(ImTextureID logo) noexcept {
         logo_ = logo;
     }
     void show_demo(bool active) noexcept;
-    [[nodiscard]] Scene &render_scene() noexcept {
-        return demo_active_ ? demo_scene_ : scene_;
+    void set_demo_texture(ImTextureID texture) noexcept {
+        demo_texture_ = texture;
+    }
+    [[nodiscard]] rhi::Extent demo_extent() const noexcept {
+        return demo_extent_;
+    }
+    [[nodiscard]] bool demo_renderable() const noexcept {
+        return demo_renderable_;
     }
     [[nodiscard]] bool demo_active() const noexcept {
         return demo_active_;
@@ -37,19 +43,19 @@ class Workspace final {
     void event(const SDL_Event &event) noexcept;
     [[nodiscard]] Result<void> verify_workflow(Scene &scene) noexcept;
     [[nodiscard]] const Camera &camera() const noexcept {
-        return demo_active_ ? demo_.camera() : camera_;
+        return camera_;
     }
     [[nodiscard]] EntityHandle selected() const noexcept {
-        return demo_active_ ? EntityHandle{} : document_.primary();
+        return document_.primary();
     }
     [[nodiscard]] std::span<const EntityHandle> selection() const noexcept {
-        return demo_active_ ? std::span<const EntityHandle>{} : document_.selection();
+        return document_.selection();
     }
     [[nodiscard]] bool grid() const noexcept {
-        return !demo_active_ && grid_;
+        return grid_;
     }
     [[nodiscard]] bool lit() const noexcept {
-        return demo_active_ || lit_;
+        return lit_;
     }
     void push(Sample sample) noexcept;
     [[nodiscard]] rhi::Extent requested_extent() const noexcept {
@@ -68,6 +74,7 @@ class Workspace final {
     void viewport(ImTextureID texture, rhi::Extent extent, Scene &scene, SDL_Window *window,
                   float density) noexcept;
     void demo_view(ImTextureID texture, SDL_Window *window, float density) noexcept;
+    void release_demo_input() noexcept;
     void draw_brand(float size) noexcept;
     void file_actions() noexcept;
     void file_error(const char *message) noexcept;
@@ -96,10 +103,13 @@ class Workspace final {
     void stop(Scene &scene) noexcept;
     EditorDocument &document_;
     Scene &scene_;
-    Scene &demo_scene_;
     demo::Session &demo_;
     ImTextureID logo_ = 0;
-    bool demo_active_ = true, demo_capture_ = false, demo_started_ = false;
+    ImTextureID demo_texture_ = 0;
+    rhi::Extent demo_extent_{800, 450};
+    std::uint32_t demo_window_ = 0;
+    bool demo_active_ = false, demo_capture_ = false, demo_started_ = false;
+    bool demo_focus_ = false, demo_renderable_ = false;
     FileDialogs files_{};
     SDL_Window *main_window_ = nullptr;
     Camera camera_{};

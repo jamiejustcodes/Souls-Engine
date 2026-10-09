@@ -96,7 +96,7 @@ void Workspace::viewport(ImTextureID texture, rhi::Extent extent, Scene &scene, 
         const auto p = ImGui::GetItemRectMin();
         bool hovered = image_hovered;
         auto &io = ImGui::GetIO();
-        if (!files_.pending() && !gizmo_edit_ && (!playing_ || ejected_) && hovered &&
+        if (!demo_capture_ && !files_.pending() && !gizmo_edit_ && (!playing_ || ejected_) && hovered &&
             ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
             ImGui::ClearActiveID();
             ImGui::SetWindowFocus("Viewport");
@@ -130,7 +130,8 @@ void Workspace::viewport(ImTextureID texture, rhi::Extent extent, Scene &scene, 
                 move.z -= 1;
             camera_.position = camera_.position + normalize(move) * speed;
         }
-        mouse_x_ = mouse_y_ = 0;
+        if (!demo_capture_)
+            mouse_x_ = mouse_y_ = 0;
         auto *draw = ImGui::GetWindowDrawList();
         const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
         if (ImGui::BeginDragDropTarget()) {
@@ -185,7 +186,7 @@ void Workspace::viewport(ImTextureID texture, rhi::Extent extent, Scene &scene, 
             ImGui::EndDragDropTarget();
         }
         gizmo(p, size, aspect);
-        const bool editing_allowed = (!playing_ || ejected_) && !files_.pending();
+        const bool editing_allowed = (!playing_ || ejected_) && !files_.pending() && !demo_capture_;
         if (hovered && editing_allowed && !flying_) {
             camera_.speed = std::clamp(camera_.speed * std::pow(1.2F, io.MouseWheel), 1.0F, 8.0F);
             const bool on_axis = io.MousePos.x > p.x + size.x - 98 * dpi && io.MousePos.y < p.y + 108 * dpi;
@@ -323,7 +324,7 @@ void Workspace::viewport(ImTextureID texture, rhi::Extent extent, Scene &scene, 
 }
 void Workspace::gizmo(const ImVec2 &origin, const ImVec2 &size, float aspect) noexcept {
     const bool enabled = selected_ && tool_ != TransformTool::select && !selection_locked() && !flying_ &&
-                         !files_.pending() && (!playing_ || ejected_);
+                         !files_.pending() && !demo_capture_ && (!playing_ || ejected_);
     ImGuizmo::Enable(enabled);
     if (!enabled) {
         if (gizmo_edit_)

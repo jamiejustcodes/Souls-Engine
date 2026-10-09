@@ -87,13 +87,10 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
     ImGuizmo::BeginFrame();
     file_actions();
     selected_ = document_.primary();
-    if (demo_active_) {
-        demo_view(texture, window, pixel_density);
-        return;
-    }
-    ImGui::BeginDisabled(files_.pending() || unsaved_prompt_);
+    demo_renderable_ = false;
+    ImGui::BeginDisabled(files_.pending() || unsaved_prompt_ || demo_capture_);
     if (!ImGui::GetIO().WantTextInput && !files_.pending() && !unsaved_prompt_ && !group_prompt_ &&
-        !flying_ && !gizmo_edit_) {
+        !flying_ && !gizmo_edit_ && !demo_capture_) {
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z))
             undo();
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y) ||
@@ -158,6 +155,8 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Window")) {
+            if (ImGui::MenuItem("Playable Demo", nullptr, demo_active_))
+                show_demo(!demo_active_);
             ImGui::MenuItem("World Outliner", nullptr, &show_outliner_);
             ImGui::MenuItem("Details", nullptr, &show_details_);
             ImGui::MenuItem("Content Browser", nullptr, &show_content_);
@@ -167,7 +166,7 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Tools")) {
-            if (ImGui::MenuItem("Play Souls Courtyard"))
+            if (ImGui::MenuItem("Open playable demo"))
                 show_demo(true);
             if (ImGui::MenuItem("Telemetry / Render Graph / Output Log"))
                 show_tools_ = true;
@@ -200,8 +199,10 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
                             document_.dirty() ? " *" : "");
         ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - 182 * dpi));
         ImGui::PushStyleColor(ImGuiCol_Button, {0.10F, 0.34F, 0.22F, 1});
-        if (ImGui::Button("Play demo", {100 * dpi, 0}))
+        if (ImGui::Button("Demo", {100 * dpi, 0}))
             show_demo(true);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Open Souls Courtyard. Drag its tab to dock or detach.");
         ImGui::PopStyleColor();
         ImGui::SameLine();
         if (ImGui::Button("About"))
@@ -373,6 +374,8 @@ void Workspace::draw(ImTextureID texture, rhi::Extent extent, const char *adapte
         focus_content_ = false;
     }
     ImGui::EndDisabled();
+    if (demo_active_)
+        demo_view(demo_texture_, window, pixel_density);
 }
 void Workspace::telemetry() noexcept {
     if (ImGui::Begin("Telemetry")) {
